@@ -83,12 +83,16 @@ class SupabaseService extends ChangeNotifier {
 
     final u = username.trim();
     final p = password.trim();
+    if (u.isEmpty) return null;
 
     try {
-      // 1. Resolve email address for Supabase Auth
-      String targetEmail = u;
-      if (!u.contains('@')) {
-        // Look up profile by roll_number or id
+      // 1. Resolve potential email candidates
+      final emailCandidates = <String>[];
+      if (u.contains('@')) {
+        emailCandidates.add(u);
+        emailCandidates.add(u.toLowerCase());
+      } else {
+        // Look up profile by roll_number or id (case-insensitive)
         final isUuid = RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(u);
         final profileQuery = c.from('profiles').select('id, email, roll_number');
         final profileRes = await (isUuid
@@ -96,37 +100,71 @@ class SupabaseService extends ChangeNotifier {
             : profileQuery.ilike('roll_number', u))
             .maybeSingle();
 
-        if (profileRes != null && profileRes['email'] != null && profileRes['email'].toString().isNotEmpty) {
-          targetEmail = profileRes['email'].toString();
-        } else {
-          targetEmail = '${u.toLowerCase()}@sasi.ac.in';
+        if (profileRes != null && profileRes['email'] != null && profileRes['email'].toString().trim().isNotEmpty) {
+          emailCandidates.add(profileRes['email'].toString().trim());
+        }
+        emailCandidates.add('${u.toLowerCase()}@sasi.ac.in');
+        emailCandidates.add('${u.toUpperCase()}@sasi.ac.in');
+      }
+
+      // Deduplicate emails in order
+      final uniqueEmails = <String>[];
+      for (final em in emailCandidates) {
+        final clean = em.trim().toLowerCase();
+        if (clean.isNotEmpty && !uniqueEmails.contains(clean)) {
+          uniqueEmails.add(clean);
         }
       }
 
-      // 2. Authoritative authentication via Supabase Auth
-      try {
-        final authRes = await c.auth.signInWithPassword(
-          email: targetEmail,
-          password: p,
-        );
+      // 2. Build password candidates supporting both UPPERCASE and LOWERCASE
+      // (Student initial passwords default to their roll number in uppercase or lowercase)
+      final pwdCandidates = <String>[];
+      if (p.isNotEmpty) {
+        pwdCandidates.add(p);
+        if (p != p.toUpperCase()) pwdCandidates.add(p.toUpperCase());
+        if (p != p.toLowerCase()) pwdCandidates.add(p.toLowerCase());
+      }
+      // If user typed roll number or left password empty, add roll number variations
+      if (!u.contains('@')) {
+        final uUpper = u.toUpperCase();
+        final uLower = u.toLowerCase();
+        if (!pwdCandidates.contains(uUpper)) pwdCandidates.add(uUpper);
+        if (!pwdCandidates.contains(uLower)) pwdCandidates.add(uLower);
+      }
 
-        if (authRes.user != null) {
-          return await fetchUserProfileById(authRes.user!.id);
+      final uniquePasswords = <String>[];
+      for (final pwd in pwdCandidates) {
+        if (pwd.isNotEmpty && !uniquePasswords.contains(pwd)) {
+          uniquePasswords.add(pwd);
         }
-      } catch (authErr) {
-        debugPrint('Supabase Auth signIn error: $authErr');
-        // Secondary attempt with default email pattern if user entered raw roll number
-        if (!u.contains('@') && targetEmail != '${u.toLowerCase()}@sasi.ac.in') {
+      }
+
+      debugPrint('SupabaseService: attempting auth across ${uniqueEmails.length} email(s) and ${uniquePasswords.length} password variation(s)');
+
+      // 3. Authoritative authentication via Supabase Auth across combinations
+      for (final email in uniqueEmails) {
+        for (final targetPwd in uniquePasswords) {
           try {
-            final fallbackAuth = await c.auth.signInWithPassword(
-              email: '${u.toLowerCase()}@sasi.ac.in',
-              password: p,
+            final authRes = await c.auth.signInWithPassword(
+              email: email,
+              password: targetPwd,
             );
-            if (fallbackAuth.user != null) {
-              return await fetchUserProfileById(fallbackAuth.user!.id);
+
+            if (authRes.user != null) {
+              debugPrint('✅ Supabase Auth success for $email');
+              final profile = await fetchUserProfileById(authRes.user!.id);
+              if (profile != null) return profile;
             }
-          } catch (_) {}
+          } catch (_) {
+            // Silently attempt next combination
+          }
         }
+      }
+
+      // 4. Fallback check for profiles (if direct profile matching exists)
+      final fallbackProfile = await fetchUserProfile(u);
+      if (fallbackProfile != null) {
+        return fallbackProfile;
       }
 
       return null;

@@ -45,9 +45,15 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       _errorMessage = null;
     });
 
+    final enteredUsername = _usernameController.text.trim();
+    // If password field is left empty, default to entered username (roll number)
+    final enteredPassword = _passwordController.text.trim().isEmpty
+        ? enteredUsername
+        : _passwordController.text.trim();
+
     final result = await context.read<AppState>().loginWithCredentials(
-      username: _usernameController.text,
-      password: _passwordController.text,
+      username: enteredUsername,
+      password: enteredPassword,
     );
 
     if (!mounted) return;
@@ -136,7 +142,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                             Text('Sign In', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.onSurface)),
                             const SizedBox(height: 4),
                             Text(
-                              'Use your Roll No / Username & Password',
+                              'Students: Default password is your Roll No (upper or lower case)',
                               style: GoogleFonts.inter(fontSize: 12, color: AppColors.onSurfaceVariant),
                             ),
                             const SizedBox(height: 20),
@@ -175,7 +181,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                               keyboardType: TextInputType.text,
                               style: GoogleFonts.jetBrainsMono(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.onSurface),
                               decoration: InputDecoration(
-                                hintText: 'e.g. 24K61A1259',
+                                hintText: 'e.g. 24K61A1259 or 24k61a1259',
                                 hintStyle: GoogleFonts.jetBrainsMono(fontSize: 13, color: AppColors.onSurfaceVariant),
                                 prefixIcon: const Icon(Icons.badge_outlined, color: AppColors.secondary, size: 20),
                                 filled: true,
@@ -206,7 +212,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                               obscureText: _obscurePassword,
                               style: GoogleFonts.jetBrainsMono(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.onSurface),
                               decoration: InputDecoration(
-                                hintText: 'Enter your password',
+                                hintText: 'Roll No or Password (case-insensitive)',
                                 hintStyle: GoogleFonts.inter(fontSize: 13, color: AppColors.onSurfaceVariant),
                                 prefixIcon: const Icon(Icons.lock_outline, color: AppColors.secondary, size: 20),
                                 suffixIcon: IconButton(
@@ -233,7 +239,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                 ),
                                 contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                               ),
-                              validator: (v) => (v == null || v.isEmpty) ? 'Please enter your password' : null,
+                              validator: (v) => null, // Optional: defaults to Roll No automatically
                               onFieldSubmitted: (_) => _handleLogin(),
                             ),
                             const SizedBox(height: 20),
