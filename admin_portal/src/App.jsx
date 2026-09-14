@@ -21,11 +21,13 @@ export default function App() {
 
   // Global counts and metrics
   const [metrics, setMetrics] = useState({
-    students: 381,
-    staff: 24,
-    events: 4,
+    students: 0,
+    staff: 0,
+    events: 0,
     registrations: 0,
-    openPolls: 1,
+    openPolls: 0,
+    attendanceToday: 0,
+    openTickets: 0,
   });
   const [events, setEvents] = useState([]);
   const [recentAttendance, setRecentAttendance] = useState([]);
