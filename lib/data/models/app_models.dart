@@ -357,25 +357,29 @@ class ProjectSubmissionModel {
       techList = (json['technologies'] as List).map((e) => e.toString()).toList();
     }
 
+    final isPublished = json['is_published'] == true ||
+        (json['status'] ?? '').toString().toUpperCase() == 'PUBLISHED';
+    final statusStr = isPublished ? 'PUBLISHED' : (json['status']?.toString() ?? 'PENDING');
+
     return ProjectSubmissionModel(
       id: json['id']?.toString() ?? '',
       eventId: json['event_id']?.toString() ?? '',
-      registrationId: json['registration_id']?.toString() ?? '',
+      registrationId: (json['team_id'] ?? json['registration_id'])?.toString() ?? '',
       teamName: json['team_name']?.toString() ?? '',
-      leaderId: json['leader_id']?.toString() ?? '',
+      leaderId: (json['submitted_by'] ?? json['leader_id'])?.toString() ?? '',
       leaderName: json['leader_name']?.toString() ?? '',
-      projectName: json['project_name']?.toString() ?? '',
-      shortDescription: json['short_description']?.toString() ?? '',
-      detailedDescription: json['detailed_description']?.toString() ?? '',
+      projectName: (json['project_title'] ?? json['project_name'])?.toString() ?? '',
+      shortDescription: (json['description'] ?? json['short_description'])?.toString() ?? '',
+      detailedDescription: (json['description'] ?? json['detailed_description'])?.toString() ?? '',
       technologies: techList,
-      repoUrl: json['repo_url']?.toString(),
-      demoUrl: json['demo_url']?.toString(),
+      repoUrl: (json['github_url'] ?? json['repo_url'])?.toString(),
+      demoUrl: (json['live_demo_url'] ?? json['demo_url'])?.toString(),
       documentationUrl: json['documentation_url']?.toString(),
-      presentationUrl: json['presentation_url']?.toString(),
-      imageUrl: json['image_url']?.toString(),
-      status: json['status']?.toString() ?? 'PENDING',
+      presentationUrl: (json['ppt_url'] ?? json['presentation_url'])?.toString(),
+      imageUrl: (json['image_url'] ?? json['public_url'])?.toString(),
+      status: statusStr,
       voteCount: (json['vote_count'] as num?)?.toInt() ?? 0,
-      createdAt: json['created_at']?.toString() ?? '',
+      createdAt: (json['submitted_at'] ?? json['created_at'])?.toString() ?? '',
       updatedAt: json['updated_at']?.toString() ?? '',
     );
   }

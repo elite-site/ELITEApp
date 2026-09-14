@@ -651,12 +651,14 @@ class AppState extends ChangeNotifier {
       _notifications[index].isRead = true;
       notifyListeners();
       if (_supabaseService.isInitialized && currentUser.id.isNotEmpty) {
-        await SupabaseService.client?.from('notification_reads').upsert({
-          'id': '${id}_${currentUser.id}',
-          'notification_id': id,
-          'user_id': currentUser.id,
-          'read_at': DateTime.now().toIso8601String(),
-        });
+        try {
+          await SupabaseService.client?.from('notification_reads').upsert({
+            'id': '${id}_${currentUser.id}',
+            'notification_id': id,
+            'user_id': currentUser.id,
+            'read_at': DateTime.now().toIso8601String(),
+          });
+        } catch (_) {}
       }
     }
   }

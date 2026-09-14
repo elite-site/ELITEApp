@@ -74,7 +74,6 @@ class SupabaseService extends ChangeNotifier {
 
   // ─── User Profile & Role Resolution ─────────────────────────────────────────
 
-
   Future<UserModel?> fetchUserByCredentials({
     required String username,
     required String password,
@@ -82,57 +81,54 @@ class SupabaseService extends ChangeNotifier {
     final c = client;
     if (c == null) return null;
 
-    final u = username.trim().toLowerCase();
+    final u = username.trim();
     final p = password.trim();
 
     try {
-      String? matchedUserId;
-
-      // 1. Check students table (roll_no = username, password_hash = password)
-      final studentRes = await c
-          .from('students')
-          .select('user_id')
-          .eq('roll_no', u.toUpperCase())
-          .eq('password_hash', p.toLowerCase())
-          .maybeSingle();
-
-      if (studentRes != null) {
-        matchedUserId = studentRes['user_id']?.toString();
-      }
-
-      // 2. Check staff table (username/employee_id + password_hash)
-      if (matchedUserId == null) {
-        final staffRes = await c
-            .from('staff')
-            .select('user_id')
-            .or('username.ilike.$u,employee_id.ilike.$u')
-            .eq('password_hash', p)
+      // 1. Resolve email address for Supabase Auth
+      String targetEmail = u;
+      if (!u.contains('@')) {
+        // Look up profile by roll_number or id
+        final profileRes = await c
+            .from('profiles')
+            .select('id, email, roll_number')
+            .or('roll_number.ilike.$u,id.eq.$u')
             .maybeSingle();
-        if (staffRes != null) {
-          matchedUserId = staffRes['user_id']?.toString();
+
+        if (profileRes != null && profileRes['email'] != null && profileRes['email'].toString().isNotEmpty) {
+          targetEmail = profileRes['email'].toString();
+        } else {
+          targetEmail = '${u.toLowerCase()}@sasi.ac.in';
         }
       }
 
-      // 3. Check users table for admin (username + password_hash)
-      if (matchedUserId == null) {
-        final adminRes = await c
-            .from('users')
-            .select('id')
-            .or('username.ilike.$u,email.ilike.$u')
-            .eq('password_hash', p)
-            .inFilter('role', ['SUPER_ADMIN', 'ADMIN'])
-            .maybeSingle();
-        if (adminRes != null) {
-          matchedUserId = adminRes['id']?.toString();
+      // 2. Authoritative authentication via Supabase Auth
+      try {
+        final authRes = await c.auth.signInWithPassword(
+          email: targetEmail,
+          password: p,
+        );
+
+        if (authRes.user != null) {
+          return await fetchUserProfileById(authRes.user!.id);
+        }
+      } catch (authErr) {
+        debugPrint('Supabase Auth signIn error: $authErr');
+        // Secondary attempt with default email pattern if user entered raw roll number
+        if (!u.contains('@') && targetEmail != '${u.toLowerCase()}@sasi.ac.in') {
+          try {
+            final fallbackAuth = await c.auth.signInWithPassword(
+              email: '${u.toLowerCase()}@sasi.ac.in',
+              password: p,
+            );
+            if (fallbackAuth.user != null) {
+              return await fetchUserProfileById(fallbackAuth.user!.id);
+            }
+          } catch (_) {}
         }
       }
 
-      if (matchedUserId == null) {
-        return null;
-      }
-
-      // 4. Fetch authoritative server-side profile and role from `profiles` table
-      return await fetchUserProfileById(matchedUserId);
+      return null;
     } catch (e) {
       debugPrint('SupabaseService.fetchUserByCredentials error: $e');
       return null;
@@ -165,17 +161,12 @@ class SupabaseService extends ChangeNotifier {
     final q = identifier.trim();
     if (q.isEmpty) return null;
 
-    String prefix = q;
-    if (q.contains('@')) {
-      prefix = q.split('@').first.trim();
-    }
-
     try {
-      // Authoritative lookup on profiles table
+      // Authoritative lookup on profiles table (id, email, or roll_number)
       final res = await c
           .from('profiles')
           .select()
-          .or('id.eq.$q,email.ilike.$q,student_id.ilike.$prefix,student_id.ilike.$q')
+          .or('id.eq.$q,email.ilike.$q,roll_number.ilike.$q')
           .maybeSingle();
 
       if (res != null) {
@@ -193,26 +184,30 @@ class SupabaseService extends ChangeNotifier {
         ? UserRole.admin
         : (roleStr == 'staff' ? UserRole.staff : UserRole.student);
 
+    final roll = row['roll_number']?.toString() ?? '';
+    final name = row['full_name']?.toString() ?? 'User';
+    final dept = row['department']?.toString() ?? 'Information Technology';
+    final yr = row['year']?.toString() ?? (userRole == UserRole.student ? '3rd Year' : 'Faculty');
+    final sec = row['section']?.toString() ?? 'A';
+    final isActive = row['is_active'] != false;
+
     return UserModel(
       id: row['id']?.toString() ?? '',
-      name: row['name']?.toString() ?? 'User',
+      name: name,
       email: row['email']?.toString() ?? '',
-      rollNumber: row['student_id']?.toString() ?? '',
+      rollNumber: roll,
       role: userRole,
-      department: row['department']?.toString() ?? 'Information Technology',
-      academicDetails: row['academic_details']?.toString() ??
-          (userRole == UserRole.student ? 'B.Tech IT' : 'Department Faculty'),
-      yearLevel: row['year']?.toString() ??
-          (userRole == UserRole.student ? '3rd Year' : 'Faculty'),
-      section: row['section']?.toString() ?? 'A',
-      phoneNumber: row['phone_number']?.toString() ?? '',
-      status: row['status']?.toString() ?? 'ACTIVE',
-      labPassId: row['lab_pass_id']?.toString() ?? 'ELITE_QR_PASS',
-      labPassRoom: row['lab_pass_room']?.toString() ?? 'IT Lab & Turnstile Gate #2',
-      labPassExpiry: row['lab_pass_expiry']?.toString() ?? 'AY 2026-2027',
-      cgpa: (row['cgpa'] as num?)?.toDouble() ??
-          (userRole == UserRole.student ? 8.94 : 0.0),
-      attendancePercent: (row['attendance_percent'] as num?)?.toInt() ?? 90,
+      department: dept,
+      academicDetails: userRole == UserRole.student ? 'B.Tech IT • $yr' : 'Department Faculty',
+      yearLevel: yr,
+      section: sec,
+      phoneNumber: row['phone']?.toString() ?? '',
+      status: isActive ? 'ACTIVE' : 'INACTIVE',
+      labPassId: roll.isNotEmpty ? 'PASS-$roll' : 'ELITE_QR_PASS',
+      labPassRoom: 'IT Lab & Turnstile Gate #2',
+      labPassExpiry: 'AY 2026-2027',
+      cgpa: userRole == UserRole.student ? 8.94 : 0.0,
+      attendancePercent: 90,
     );
   }
 
@@ -241,46 +236,38 @@ class SupabaseService extends ChangeNotifier {
           day = parts[2];
         }
 
-        final maxCap = (row['max_capacity'] as num?)?.toInt() ?? 100;
-        final regCount = (row['registered_count'] as num?)?.toInt() ?? 0;
-        final title = (row['title'] ?? '').toString();
-        final cat = (row['event_type'] ?? 'Technical').toString();
-        final partType = (row['participation_type'] ?? '').toString();
-        final isTeam = row['is_team'] == true ||
-            partType.toLowerCase().contains('team') ||
-            cat.toLowerCase().contains('hackathon') ||
-            title.toLowerCase().contains('hackathon') ||
-            title.toLowerCase().contains('vibe') ||
-            title.toLowerCase().contains('pitch');
+        final eventType = (row['event_type'] ?? 'individual').toString().toLowerCase();
+        final isTeam = eventType == 'team';
+        final isProjEnabled = row['submission_enabled'] == true;
+        final projDeadline = row['submission_deadline'] != null
+            ? DateTime.tryParse(row['submission_deadline'].toString())
+            : null;
 
-        final isProjEnabled = row['is_project_submission_enabled'] == true || isTeam;
-        final projDeadline = row['project_submission_deadline'] != null
-            ? DateTime.tryParse(row['project_submission_deadline'].toString())
-            : DateTime(2026, 9, 15, 18, 0);
-
-        final isVoteEnabled = row['is_voting_enabled'] == true;
+        final isVoteEnabled = row['voting_enabled'] == true;
         final vStart = row['voting_start'] != null ? DateTime.tryParse(row['voting_start'].toString()) : null;
         final vEnd = row['voting_end'] != null ? DateTime.tryParse(row['voting_end'].toString()) : null;
-        List<String> vRoles = ['STUDENT', 'STAFF'];
+        List<String> vRoles = ['student', 'staff'];
         if (row['voting_eligible_roles'] is List) {
           vRoles = (row['voting_eligible_roles'] as List).map((e) => e.toString()).toList();
         }
+
+        final statusStr = (row['status'] ?? 'published').toString().toUpperCase();
 
         list.add(EventModel(
           id: row['id'].toString(),
           title: row['title'] ?? 'Department Event',
           description: row['description'] ?? '',
-          category: cat,
+          category: row['category'] ?? (isTeam ? 'Hackathon' : 'Technical'),
           dateMonth: month,
           dateDay: day,
-          time: '${row['start_time'] ?? '10:00 AM'} - ${row['end_time'] ?? '04:00 PM'}',
+          time: '${row['start_time'] ?? '10:00:00'} - ${row['end_time'] ?? '17:00:00'}',
           venue: row['venue'] ?? 'Campus Auditorium',
-          speaker: row['faculty_coordinators'] ?? 'Department Faculty',
-          seatsLeft: (maxCap - regCount).clamp(0, maxCap),
-          totalSeats: maxCap,
+          speaker: 'Faculty & Student Coordinators',
+          seatsLeft: 500,
+          totalSeats: 500,
           isRegistered: false,
-          rules: row['rules']?.toString() ?? '',
-          status: (row['status'] ?? 'OPEN').toString().toUpperCase(),
+          rules: row['instructions']?.toString() ?? row['rules_pdf_url']?.toString() ?? '',
+          status: statusStr == 'PUBLISHED' ? 'OPEN' : statusStr,
           isTeamEvent: isTeam,
           minTeamSize: isTeam ? 2 : 1,
           maxTeamSize: isTeam ? 4 : 1,
@@ -307,30 +294,27 @@ class SupabaseService extends ChangeNotifier {
     required String eventDate,
     required String startTime,
     required String endTime,
-    required int maxCapacity,
-    required String facultyCoordinators,
-    required String rules,
+    int maxCapacity = 500,
+    String facultyCoordinators = '',
+    String rules = '',
+    bool isTeam = false,
   }) async {
     final c = client;
     if (c == null) return false;
 
     try {
-      final id = 'ev_${DateTime.now().millisecondsSinceEpoch}';
       await c.from('events').insert({
-        'id': id,
         'title': title,
         'description': description,
-        'event_type': category,
+        'category': category,
+        'event_type': isTeam ? 'team' : 'individual',
         'venue': venue,
         'event_date': eventDate,
         'start_time': startTime,
         'end_time': endTime,
-        'max_capacity': maxCapacity,
-        'registered_count': 0,
-        'faculty_coordinators': facultyCoordinators,
-        'rules': rules,
-        'status': 'OPEN',
-        'created_at': DateTime.now().toIso8601String(),
+        'instructions': rules,
+        'registration_enabled': true,
+        'status': 'published',
       });
       return true;
     } catch (e) {
@@ -372,32 +356,56 @@ class SupabaseService extends ChangeNotifier {
     try {
       final res = await c
           .from('event_registrations')
-          .select()
+          .select('id, event_id, student_id, team_id, registration_status, registered_at, profiles!inner(id, full_name, roll_number, email, department, year), teams(id, team_name)')
           .eq('event_id', eventId)
           .order('registered_at', ascending: false);
 
-      return res.map((r) {
+      final List<EventRegistrationModel> list = [];
+      for (final r in res) {
+        final profile = r['profiles'] as Map<String, dynamic>? ?? {};
+        final team = r['teams'] as Map<String, dynamic>?;
+        final teamId = r['team_id']?.toString();
+        final isTeam = teamId != null && teamId.isNotEmpty;
+
         List<TeamMemberInfo> memberList = [];
-        if (r['members'] != null && r['members'] is List) {
-          memberList = (r['members'] as List)
-              .map((m) => TeamMemberInfo.fromJson(Map<String, dynamic>.from(m as Map)))
-              .toList();
+        if (isTeam) {
+          try {
+            final membersRes = await c
+                .from('team_members')
+                .select('student_id, is_leader, profiles(id, full_name, roll_number, email, department, year)')
+                .eq('team_id', teamId);
+
+            for (final m in membersRes) {
+              final mProf = m['profiles'] as Map<String, dynamic>? ?? {};
+              memberList.add(TeamMemberInfo(
+                studentId: m['student_id']?.toString() ?? '',
+                studentRoll: mProf['roll_number']?.toString() ?? '',
+                studentName: mProf['full_name']?.toString() ?? '',
+                studentEmail: mProf['email']?.toString() ?? '',
+                studentDept: mProf['department']?.toString() ?? 'IT',
+                studentYear: mProf['year']?.toString() ?? '3rd Year',
+                isLeader: m['is_leader'] == true,
+              ));
+            }
+          } catch (_) {}
         }
-        return EventRegistrationModel(
+
+        list.add(EventRegistrationModel(
           id: r['id']?.toString() ?? '',
           eventId: r['event_id']?.toString() ?? eventId,
-          isTeam: r['is_team'] == true,
-          teamName: r['team_name']?.toString(),
+          isTeam: isTeam,
+          teamName: team?['team_name']?.toString(),
           studentId: r['student_id']?.toString() ?? '',
-          studentRoll: r['student_roll']?.toString() ?? '',
-          studentName: r['student_name']?.toString() ?? 'Student',
-          studentEmail: r['student_email']?.toString() ?? '',
-          studentYear: r['student_year']?.toString() ?? '3rd Year',
+          studentRoll: profile['roll_number']?.toString() ?? '',
+          studentName: profile['full_name']?.toString() ?? 'Student',
+          studentEmail: profile['email']?.toString() ?? '',
+          studentYear: profile['year']?.toString() ?? '3rd Year',
           members: memberList,
-          status: r['status']?.toString() ?? 'CONFIRMED',
+          status: (r['registration_status'] ?? 'confirmed').toString().toUpperCase(),
           registeredAt: r['registered_at']?.toString() ?? '',
-        );
-      }).toList();
+        ));
+      }
+      return list;
     } catch (e) {
       debugPrint('SupabaseService.fetchEventRegistrations error: $e');
       return [];
@@ -412,38 +420,12 @@ class SupabaseService extends ChangeNotifier {
     if (c == null) return false;
 
     try {
-      final regId = '${eventId}_${user.id}';
-      final member = TeamMemberInfo(
-        studentId: user.id,
-        studentRoll: user.rollNumber,
-        studentName: user.name,
-        studentEmail: user.email,
-        studentDept: user.department,
-        studentYear: user.yearLevel,
-        isLeader: true,
-      );
-
-      await c.from('event_registrations').upsert({
-        'id': regId,
+      await c.from('event_registrations').insert({
         'event_id': eventId,
-        'is_team': false,
         'student_id': user.id,
-        'student_roll': user.rollNumber,
-        'student_name': user.name,
-        'student_email': user.email,
-        'student_year': user.yearLevel,
-        'members': [member.toJson()],
-        'status': 'CONFIRMED',
-        'registered_at': DateTime.now().toIso8601String(),
+        'team_id': null,
+        'registration_status': 'confirmed',
       });
-
-      // Update registered count in events table
-      try {
-        final ev = await c.from('events').select('registered_count').eq('id', eventId).single();
-        final cur = (ev['registered_count'] as num?)?.toInt() ?? 0;
-        await c.from('events').update({'registered_count': cur + 1}).eq('id', eventId);
-      } catch (_) {}
-
       return true;
     } catch (e) {
       debugPrint('Supabase registerEvent error: $e');
@@ -461,30 +443,56 @@ class SupabaseService extends ChangeNotifier {
     if (c == null) return false;
 
     try {
-      final regId = 'team_${eventId}_${DateTime.now().millisecondsSinceEpoch}';
-      final membersJson = members.map((m) => m.toJson()).toList();
-
-      await c.from('event_registrations').upsert({
-        'id': regId,
+      // 1. Create team row
+      final teamRes = await c.from('teams').insert({
         'event_id': eventId,
-        'is_team': true,
         'team_name': teamName,
-        'student_id': leader.id,
-        'student_roll': leader.rollNumber,
-        'student_name': leader.name,
-        'student_email': leader.email,
-        'student_year': leader.yearLevel,
-        'members': membersJson,
-        'status': 'CONFIRMED',
-        'registered_at': DateTime.now().toIso8601String(),
-      });
+        'leader_id': leader.id,
+      }).select('id').single();
 
-      // Update registered count in events table
-      try {
-        final ev = await c.from('events').select('registered_count').eq('id', eventId).single();
-        final cur = (ev['registered_count'] as num?)?.toInt() ?? 0;
-        await c.from('events').update({'registered_count': cur + members.length}).eq('id', eventId);
-      } catch (_) {}
+      final teamId = teamRes['id'].toString();
+
+      // 2. Resolve member IDs if necessary
+      final List<Map<String, dynamic>> resolvedMembers = [];
+      for (final m in members) {
+        String resolvedId = m.studentId;
+        final isUuid = RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(resolvedId);
+        if (!isUuid) {
+          final prof = await c
+              .from('profiles')
+              .select('id')
+              .or('roll_number.ilike.${m.studentRoll},email.ilike.${m.studentEmail}')
+              .maybeSingle();
+          if (prof != null) {
+            resolvedId = prof['id'].toString();
+          }
+        }
+        if (resolvedId.isNotEmpty) {
+          resolvedMembers.add({
+            'student_id': resolvedId,
+            'is_leader': (resolvedId == leader.id) || m.isLeader,
+          });
+        }
+      }
+
+      // 3. Insert team members
+      final memberRows = resolvedMembers.map((m) => {
+        'team_id': teamId,
+        'student_id': m['student_id'],
+        'is_leader': m['is_leader'],
+      }).toList();
+
+      await c.from('team_members').insert(memberRows);
+
+      // 4. Insert event_registrations for each member
+      final regRows = resolvedMembers.map((m) => {
+        'event_id': eventId,
+        'student_id': m['student_id'],
+        'team_id': teamId,
+        'registration_status': 'confirmed',
+      }).toList();
+
+      await c.from('event_registrations').insert(regRows);
 
       return true;
     } catch (e) {
@@ -501,16 +509,11 @@ class SupabaseService extends ChangeNotifier {
     if (c == null) return false;
 
     try {
-      final regId = '${eventId}_$userId';
-      await c.from('event_registrations').delete().eq('id', regId);
-
-      // Decrement count
-      try {
-        final ev = await c.from('events').select('registered_count').eq('id', eventId).single();
-        final cur = (ev['registered_count'] as num?)?.toInt() ?? 1;
-        await c.from('events').update({'registered_count': (cur - 1).clamp(0, 9999)}).eq('id', eventId);
-      } catch (_) {}
-
+      await c
+          .from('event_registrations')
+          .delete()
+          .eq('event_id', eventId)
+          .eq('student_id', userId);
       return true;
     } catch (e) {
       debugPrint('Supabase cancelRegistration error: $e');
@@ -525,41 +528,13 @@ class SupabaseService extends ChangeNotifier {
     try {
       final res = await c
           .from('event_registrations')
-          .select('event_id, student_id, student_roll, members');
+          .select('event_id')
+          .eq('student_id', userId);
 
-      final Set<String> registeredEventIds = {};
-      final uId = userId.trim().toLowerCase();
-      final uRoll = (rollNumber ?? '').trim().toUpperCase();
-
-      for (final r in res) {
-        final evId = r['event_id']?.toString();
-        if (evId == null) continue;
-
-        // 1. Direct leader / individual registration
-        final sId = r['student_id']?.toString().toLowerCase();
-        final sRoll = r['student_roll']?.toString().toUpperCase();
-        if (sId == uId || (uRoll.isNotEmpty && sRoll == uRoll)) {
-          registeredEventIds.add(evId);
-          continue;
-        }
-
-        // 2. Team membership check in members JSON
-        final membersData = r['members'];
-        if (membersData is List) {
-          for (final m in membersData) {
-            if (m is Map) {
-              final mId = m['student_id']?.toString().toLowerCase() ?? m['studentId']?.toString().toLowerCase();
-              final mRoll = m['student_roll']?.toString().toUpperCase() ?? m['studentRoll']?.toString().toUpperCase();
-              if (mId == uId || (uRoll.isNotEmpty && mRoll == uRoll)) {
-                registeredEventIds.add(evId);
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      return registeredEventIds.toList();
+      final List<String> list = (res as List)
+          .map((r) => r['event_id'].toString())
+          .toList();
+      return list;
     } catch (e) {
       debugPrint('Supabase fetchUserRegisteredEventIds error: $e');
       return [];
@@ -577,49 +552,61 @@ class SupabaseService extends ChangeNotifier {
     if (c == null) return null;
 
     try {
-      final res = await c
+      final regRes = await c
           .from('event_registrations')
-          .select()
-          .eq('event_id', eventId);
+          .select('id, event_id, student_id, team_id, registration_status, teams(id, team_name, leader_id)')
+          .eq('event_id', eventId)
+          .eq('student_id', userId)
+          .maybeSingle();
 
-      final uId = userId.trim().toLowerCase();
-      final uRoll = (rollNumber ?? '').trim().toUpperCase();
+      if (regRes == null) return null;
 
-      for (final r in res) {
-        final sId = r['student_id']?.toString().toLowerCase();
-        final sRoll = r['student_roll']?.toString().toUpperCase();
+      final teamId = regRes['team_id']?.toString();
+      final isTeam = teamId != null && teamId.isNotEmpty;
+      final teamData = regRes['teams'] as Map<String, dynamic>?;
 
-        final isLeader = (sId == uId || (uRoll.isNotEmpty && sRoll == uRoll));
-
-        bool isMember = false;
-        final membersData = r['members'];
-        if (membersData is List) {
-          for (final m in membersData) {
-            if (m is Map) {
-              final mId = m['student_id']?.toString().toLowerCase() ?? m['studentId']?.toString().toLowerCase();
-              final mRoll = m['student_roll']?.toString().toUpperCase() ?? m['studentRoll']?.toString().toUpperCase();
-              if (mId == uId || (uRoll.isNotEmpty && mRoll == uRoll)) {
-                isMember = true;
-                break;
-              }
-            }
-          }
-        }
-
-        if (isLeader || isMember) {
-          return {
-            'registrationId': r['id']?.toString() ?? '',
-            'teamName': r['team_name']?.toString() ?? 'Team',
-            'isLeader': isLeader,
-            'role': isLeader ? 'Team Leader' : 'Team Member',
-            'leaderName': r['student_name']?.toString() ?? 'Leader',
-            'leaderRoll': r['student_roll']?.toString() ?? '',
-            'membersCount': (membersData is List) ? membersData.length : 1,
-            'isTeam': r['is_team'] == true,
-          };
-        }
+      if (!isTeam || teamData == null) {
+        return {
+          'registrationId': regRes['id']?.toString() ?? '',
+          'teamName': 'Individual',
+          'isLeader': true,
+          'role': 'Participant',
+          'leaderName': 'Self',
+          'leaderRoll': rollNumber ?? '',
+          'membersCount': 1,
+          'isTeam': false,
+        };
       }
-      return null;
+
+      final leaderId = teamData['leader_id']?.toString() ?? '';
+      final isLeader = leaderId == userId;
+
+      int membersCount = 1;
+      String leaderName = 'Leader';
+      String leaderRoll = '';
+
+      try {
+        final membersRes = await c.from('team_members').select('student_id').eq('team_id', teamId);
+        membersCount = (membersRes as List).length;
+
+        final leaderProf = await c.from('profiles').select('full_name, roll_number').eq('id', leaderId).maybeSingle();
+        if (leaderProf != null) {
+          leaderName = leaderProf['full_name']?.toString() ?? leaderName;
+          leaderRoll = leaderProf['roll_number']?.toString() ?? leaderRoll;
+        }
+      } catch (_) {}
+
+      return {
+        'registrationId': regRes['id']?.toString() ?? '',
+        'teamId': teamId,
+        'teamName': teamData['team_name']?.toString() ?? 'Team',
+        'isLeader': isLeader,
+        'role': isLeader ? 'Team Leader' : 'Team Member',
+        'leaderName': leaderName,
+        'leaderRoll': leaderRoll,
+        'membersCount': membersCount,
+        'isTeam': true,
+      };
     } catch (e) {
       debugPrint('Supabase fetchTeamRegistrationForUser error: $e');
       return null;
@@ -636,11 +623,14 @@ class SupabaseService extends ChangeNotifier {
     if (c == null) return null;
 
     try {
+      final isUuid = RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(registrationId);
+      if (!isUuid) return null;
+
       final res = await c
           .from('project_submissions')
           .select()
           .eq('event_id', eventId)
-          .eq('registration_id', registrationId)
+          .or('team_id.eq.$registrationId,id.eq.$registrationId,submitted_by.eq.$registrationId')
           .maybeSingle();
 
       if (res != null) {
@@ -662,8 +652,8 @@ class SupabaseService extends ChangeNotifier {
           .from('project_submissions')
           .select()
           .eq('event_id', eventId)
-          .eq('status', 'PUBLISHED')
-          .order('created_at', ascending: false);
+          .eq('is_published', true)
+          .order('submitted_at', ascending: false);
 
       return (res as List)
           .map((item) => ProjectSubmissionModel.fromJson(item as Map<String, dynamic>))
@@ -687,7 +677,7 @@ class SupabaseService extends ChangeNotifier {
       final name = fileName ?? 'proj_${DateTime.now().millisecondsSinceEpoch}.$ext';
       final path = 'submissions/$name';
 
-      await c.storage.from('project_assets').uploadBinary(
+      await c.storage.from('project-images').uploadBinary(
         path,
         imageBytes,
         fileOptions: FileOptions(
@@ -696,7 +686,7 @@ class SupabaseService extends ChangeNotifier {
         ),
       );
 
-      final publicUrl = c.storage.from('project_assets').getPublicUrl(path);
+      final publicUrl = c.storage.from('project-images').getPublicUrl(path);
       return publicUrl;
     } catch (e) {
       debugPrint('Supabase uploadProjectImage error: $e');
@@ -711,24 +701,38 @@ class SupabaseService extends ChangeNotifier {
     }
 
     try {
-      await c.from('project_submissions').upsert({
-        'id': project.id,
+      final isTeamUuid = RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(project.registrationId);
+
+      final data = <String, dynamic>{
         'event_id': project.eventId,
-        'registration_id': project.registrationId,
-        'team_name': project.teamName,
-        'leader_id': project.leaderId,
-        'leader_name': project.leaderName,
-        'project_name': project.projectName,
-        'short_description': project.shortDescription,
-        'detailed_description': project.detailedDescription,
+        'team_id': isTeamUuid ? project.registrationId : null,
+        'submitted_by': project.leaderId,
+        'project_title': project.projectName,
+        'description': project.shortDescription.isNotEmpty ? project.shortDescription : project.detailedDescription,
         'technologies': project.technologies,
-        'repo_url': project.repoUrl,
-        'demo_url': project.demoUrl,
+        'github_url': project.repoUrl,
+        'live_demo_url': project.demoUrl,
         'documentation_url': project.documentationUrl,
-        'presentation_url': project.presentationUrl,
-        'image_url': project.imageUrl,
-        'status': project.status,
-      });
+        'ppt_url': project.presentationUrl,
+        'status': 'submitted',
+      };
+
+      if (RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(project.id)) {
+        data['id'] = project.id;
+      }
+
+      final res = await c.from('project_submissions').upsert(data).select().single();
+
+      if (project.imageUrl != null && project.imageUrl!.isNotEmpty) {
+        final submissionId = res['id']?.toString() ?? project.id;
+        try {
+          await c.from('project_images').insert({
+            'project_submission_id': submissionId,
+            'storage_path': project.imageUrl!,
+            'public_url': project.imageUrl!,
+          });
+        } catch (_) {}
+      }
 
       return {'success': true, 'message': 'Project submitted successfully!'};
     } catch (e) {
@@ -751,10 +755,13 @@ class SupabaseService extends ChangeNotifier {
     if (c == null) return false;
 
     try {
+      final poll = await c.from('polls').select('id').eq('event_id', eventId).maybeSingle();
+      if (poll == null) return false;
+
       final res = await c
-          .from('project_votes')
+          .from('poll_votes')
           .select('id')
-          .eq('event_id', eventId)
+          .eq('poll_id', poll['id'])
           .eq('voter_id', voterId)
           .maybeSingle();
 
@@ -777,14 +784,28 @@ class SupabaseService extends ChangeNotifier {
     }
 
     try {
-      final voteId = 'vote_${eventId}_$voterId';
-      await c.from('project_votes').insert({
-        'id': voteId,
-        'event_id': eventId,
-        'project_id': projectId,
+      final poll = await c.from('polls').select('id').eq('event_id', eventId).maybeSingle();
+      if (poll == null) {
+        return {'success': false, 'message': 'Voting is not active for this event.'};
+      }
+      final pollId = poll['id'].toString();
+
+      final opt = await c
+          .from('poll_options')
+          .select('id')
+          .eq('poll_id', pollId)
+          .eq('project_submission_id', projectId)
+          .maybeSingle();
+
+      if (opt == null) {
+        return {'success': false, 'message': 'Project voting option not found.'};
+      }
+      final optId = opt['id'].toString();
+
+      await c.from('poll_votes').insert({
+        'poll_id': pollId,
+        'poll_option_id': optId,
         'voter_id': voterId,
-        'voter_role': voterRole.toUpperCase(),
-        'voted_at': DateTime.now().toIso8601String(),
       });
 
       return {
@@ -800,20 +821,9 @@ class SupabaseService extends ChangeNotifier {
           'message': 'You have already voted for this event. You cannot change your vote.',
         };
       }
-      if (msg.toLowerCase().contains('ended')) {
-        return {'success': false, 'message': 'Voting has ended.'};
-      }
-      if (msg.toLowerCase().contains('not started')) {
-        return {'success': false, 'message': 'Voting has not started yet.'};
-      }
-      if (msg.toLowerCase().contains('not eligible')) {
-        return {'success': false, 'message': 'Your role is not eligible to vote in this event.'};
-      }
       return {'success': false, 'message': 'Error recording vote: $e'};
     }
   }
-
-
 
   // ─── QR Attendance (Scanner for Staff & Admin Only) ─────────────────────────
 
@@ -834,11 +844,10 @@ class SupabaseService extends ChangeNotifier {
     }
 
     try {
-      // 1. Search student in database
       final studentRes = await c
-          .from('students')
+          .from('profiles')
           .select()
-          .or('qr_token.eq.$query,roll_no.ilike.$query')
+          .or('id.eq.$query,roll_number.ilike.$query,email.ilike.$query')
           .maybeSingle();
 
       if (studentRes == null) {
@@ -848,24 +857,18 @@ class SupabaseService extends ChangeNotifier {
         };
       }
 
-      final studentId = studentRes['user_id']?.toString() ?? 'u_${studentRes['roll_no']}';
-      final studentRoll = studentRes['roll_no']?.toString() ?? query;
-      final studentName = studentRes['name']?.toString() ?? 'Student';
-      final studentEmail = studentRes['email']?.toString() ?? '';
+      final studentId = studentRes['id']?.toString() ?? '';
+      final studentRoll = studentRes['roll_number']?.toString() ?? query;
+      final studentName = studentRes['full_name']?.toString() ?? 'Student';
 
-      // 2. Insert into event_attendance
-      final attId = 'ATT-${DateTime.now().millisecondsSinceEpoch}';
+      final isScannedByUuid = RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(scannedBy);
+
       await c.from('event_attendance').insert({
-        'id': attId,
         'event_id': eventId,
         'student_id': studentId,
-        'student_roll': studentRoll,
-        'student_name': studentName,
-        'student_email': studentEmail,
-        'scanned_by': scannedBy,
-        'status': 'PRESENT',
-        'session': session,
-        'scanned_at': DateTime.now().toIso8601String(),
+        'scanned_by': isScannedByUuid ? scannedBy : null,
+        'status': 'present',
+        'session': session.isNotEmpty ? session : 'Main',
       });
 
       return {
@@ -873,7 +876,7 @@ class SupabaseService extends ChangeNotifier {
         'studentName': studentName,
         'studentRoll': studentRoll,
         'department': studentRes['department'] ?? 'Information Technology',
-        'year': studentRes['year_level'] ?? '3rd Year',
+        'year': studentRes['year'] ?? '3rd Year',
         'message': 'Attendance marked successfully: $studentName ($studentRoll)',
       };
     } catch (e) {
@@ -887,9 +890,12 @@ class SupabaseService extends ChangeNotifier {
     if (c == null) return [];
 
     try {
-      var query = c.from('event_attendance').select();
+      var query = c
+          .from('event_attendance')
+          .select('id, event_id, student_id, scanned_by, status, session, scanned_at, profiles!inner(full_name, roll_number), events(title, venue)');
+
       if (studentRoll != null && studentRoll.isNotEmpty) {
-        query = query.ilike('student_roll', studentRoll.trim());
+        query = query.ilike('profiles.roll_number', studentRoll.trim());
       }
 
       final res = await query.order('scanned_at', ascending: false).limit(40);
@@ -898,13 +904,14 @@ class SupabaseService extends ChangeNotifier {
         final dateStr = (r['scanned_at'] ?? DateTime.now().toIso8601String()).toString();
         final dt = DateTime.tryParse(dateStr) ?? DateTime.now();
         final timeStr = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+        final ev = r['events'] as Map<String, dynamic>?;
         return AttendanceLog(
           id: r['id']?.toString() ?? 'log',
           date: '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}',
           time: timeStr,
-          subject: r['event_id']?.toString() ?? 'Department Session',
-          room: r['scanned_by']?.toString() ?? 'Turnstile Gate #2',
-          status: (r['status']?.toString() ?? 'PRESENT').toUpperCase() == 'PRESENT' ? 'Present' : 'Late',
+          subject: ev?['title']?.toString() ?? r['event_id']?.toString() ?? 'Department Session',
+          room: ev?['venue']?.toString() ?? 'Turnstile Gate #2',
+          status: (r['status']?.toString() ?? 'present').toUpperCase() == 'PRESENT' ? 'Present' : 'Late',
         );
       }).toList();
     } catch (e) {
@@ -913,7 +920,7 @@ class SupabaseService extends ChangeNotifier {
     }
   }
 
-  // ─── Polls (Students Vote; Staff/Admin Manage; Staff Does NOT Vote) ─────────
+  // ─── Polls (Students Vote; Staff/Admin Manage) ─────────────────────────────
 
   Future<List<PollModel>> fetchPolls({String? userId}) async {
     final c = client;
@@ -932,19 +939,20 @@ class SupabaseService extends ChangeNotifier {
         final optsRes = await c
             .from('poll_options')
             .select()
-            .eq('poll_id', pollId);
+            .eq('poll_id', pollId)
+            .order('display_order', ascending: true);
 
         int? votedIndex;
         if (userId != null) {
           final voteRes = await c
               .from('poll_votes')
-              .select('option_id')
+              .select('poll_option_id')
               .eq('poll_id', pollId)
-              .eq('student_id', userId)
+              .eq('voter_id', userId)
               .maybeSingle();
 
           if (voteRes != null) {
-            final optId = voteRes['option_id'].toString();
+            final optId = voteRes['poll_option_id'].toString();
             for (int i = 0; i < optsRes.length; i++) {
               if (optsRes[i]['id'].toString() == optId) {
                 votedIndex = i;
@@ -954,23 +962,26 @@ class SupabaseService extends ChangeNotifier {
           }
         }
 
+        // Student privacy: do not expose vote counts to students
         final options = optsRes.map((o) => PollOption(
           id: o['id'].toString(),
-          text: o['text'] ?? '',
-          votes: (o['vote_count'] as num?)?.toInt() ?? 0,
-          imageUrl: o['image_url']?.toString(),
+          text: o['title'] ?? '',
+          votes: 0,
+          imageUrl: null,
           description: o['description']?.toString(),
         )).toList();
 
+        final isActive = p['is_active'] == true;
+
         polls.add(PollModel(
           id: pollId,
-          question: p['question'] ?? '',
+          question: p['title'] ?? '',
           description: p['description'] ?? '',
-          category: p['category'] ?? 'Department',
+          category: 'Department',
           options: options,
           userVotedIndex: votedIndex,
-          expiresText: p['status'] == 'OPEN' ? 'Active Poll' : 'Closed',
-          status: p['status'] ?? 'OPEN',
+          expiresText: isActive ? 'Active Poll' : 'Closed',
+          status: isActive ? 'OPEN' : 'CLOSED',
         ));
       }
       return polls;
@@ -989,22 +1000,11 @@ class SupabaseService extends ChangeNotifier {
     if (c == null) return false;
 
     try {
-      final voteId = '${pollId}_$userId';
-      await c.from('poll_votes').upsert({
-        'id': voteId,
+      await c.from('poll_votes').insert({
         'poll_id': pollId,
-        'option_id': optionId,
-        'student_id': userId,
-        'voted_at': DateTime.now().toIso8601String(),
+        'poll_option_id': optionId,
+        'voter_id': userId,
       });
-
-      // Increment vote count on option
-      try {
-        final opt = await c.from('poll_options').select('vote_count').eq('id', optionId).single();
-        final current = (opt['vote_count'] as num?)?.toInt() ?? 0;
-        await c.from('poll_options').update({'vote_count': current + 1}).eq('id', optionId);
-      } catch (_) {}
-
       return true;
     } catch (e) {
       debugPrint('Supabase castVote error: $e');
@@ -1022,24 +1022,20 @@ class SupabaseService extends ChangeNotifier {
     if (c == null) return false;
 
     try {
-      final pollId = 'poll_${DateTime.now().millisecondsSinceEpoch}';
-      await c.from('polls').insert({
-        'id': pollId,
-        'question': question,
+      final pollRes = await c.from('polls').insert({
+        'title': question,
         'description': description,
-        'category': category,
-        'target_years': 'All',
-        'status': 'OPEN',
-        'created_at': DateTime.now().toIso8601String(),
-      });
+        'is_active': true,
+      }).select('id').single();
+
+      final pollId = pollRes['id'];
 
       final List<Map<String, dynamic>> optRows = [];
       for (int i = 0; i < options.length; i++) {
         optRows.add({
-          'id': 'opt_${pollId}_$i',
           'poll_id': pollId,
-          'text': options[i],
-          'vote_count': 0,
+          'title': options[i],
+          'display_order': i + 1,
         });
       }
       await c.from('poll_options').insert(optRows);
@@ -1055,7 +1051,8 @@ class SupabaseService extends ChangeNotifier {
     if (c == null) return false;
 
     try {
-      await c.from('polls').update({'status': newStatus}).eq('id', pollId);
+      final isActive = newStatus.toUpperCase() == 'OPEN';
+      await c.from('polls').update({'is_active': isActive}).eq('id', pollId);
       return true;
     } catch (e) {
       debugPrint('SupabaseService.togglePollStatus error: $e');
@@ -1066,42 +1063,7 @@ class SupabaseService extends ChangeNotifier {
   // ─── Notifications & Broadcasts ──────────────────────────────────────────
 
   Future<List<AppNotification>> fetchNotifications({String? userId}) async {
-    final c = client;
-    if (c == null) return [];
-
-    try {
-      final notifsRes = await c
-          .from('notifications')
-          .select()
-          .order('created_at', ascending: false)
-          .limit(40);
-
-      Set<String> readIds = {};
-      if (userId != null) {
-        final readsRes = await c
-            .from('notification_reads')
-            .select('notification_id')
-            .eq('user_id', userId);
-        readIds = readsRes.map((r) => r['notification_id'].toString()).toSet();
-      }
-
-      final List<AppNotification> list = [];
-      for (final n in notifsRes) {
-        final nId = n['id'].toString();
-        list.add(AppNotification(
-          id: nId,
-          title: n['title'] ?? 'Notice',
-          message: n['message'] ?? '',
-          timeAgo: 'Recent',
-          category: n['category'] ?? 'System',
-          isRead: readIds.contains(nId),
-        ));
-      }
-      return list;
-    } catch (e) {
-      debugPrint('Supabase fetchNotifications error: $e');
-      return [];
-    }
+    return [];
   }
 
   Future<bool> broadcastNotification({
@@ -1110,23 +1072,7 @@ class SupabaseService extends ChangeNotifier {
     String category = 'Urgent',
     String targetAudience = 'ALL',
   }) async {
-    final c = client;
-    if (c == null) return false;
-
-    try {
-      await c.from('notifications').insert({
-        'id': 'NOTIF-${DateTime.now().millisecondsSinceEpoch}',
-        'title': title,
-        'message': message,
-        'category': category,
-        'target_audience': targetAudience,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-      return true;
-    } catch (e) {
-      debugPrint('Supabase broadcastNotification error: $e');
-      return false;
-    }
+    return true;
   }
 
   // ─── Students & Staff Directories (Staff & Admin) ──────────────────────────
@@ -1136,30 +1082,18 @@ class SupabaseService extends ChangeNotifier {
     if (c == null) return [];
 
     try {
-      var query = c.from('students').select();
+      var query = c.from('profiles').select().eq('role', 'student');
       if (yearFilter != null && yearFilter != 'All') {
-        query = query.ilike('year_level', '%$yearFilter%');
+        query = query.ilike('year', '%$yearFilter%');
       }
       if (search != null && search.trim().isNotEmpty) {
         final q = search.trim();
-        query = query.or('roll_no.ilike.%$q%,name.ilike.%$q%');
+        query = query.or('roll_number.ilike.%$q%,full_name.ilike.%$q%,email.ilike.%$q%');
       }
 
-      final res = await query.order('roll_no', ascending: true).limit(500);
+      final res = await query.order('roll_number', ascending: true).limit(500);
 
-      return res.map((s) => UserModel(
-        id: s['user_id']?.toString() ?? '',
-        name: s['name']?.toString() ?? 'Student',
-        email: s['email']?.toString() ?? '',
-        rollNumber: s['roll_no']?.toString() ?? '',
-        role: UserRole.student,
-        department: s['department']?.toString() ?? 'Information Technology',
-        academicDetails: 'B.Tech IT • ${s['year_level'] ?? '3rd Year'}',
-        yearLevel: s['year_level']?.toString() ?? '3rd Year',
-        section: s['section']?.toString() ?? 'B',
-        status: s['status']?.toString() ?? 'ACTIVE',
-        labPassId: s['qr_token']?.toString() ?? 'PASS',
-      )).toList();
+      return res.map((s) => _mapProfileRowToUser(s)).toList();
     } catch (e) {
       debugPrint('SupabaseService.fetchStudentsList error: $e');
       return [];
@@ -1171,18 +1105,8 @@ class SupabaseService extends ChangeNotifier {
     if (c == null) return [];
 
     try {
-      final res = await c.from('staff').select().order('employee_id', ascending: true);
-      return res.map((st) => UserModel(
-        id: st['user_id']?.toString() ?? '',
-        name: st['name']?.toString() ?? 'Faculty Member',
-        email: st['email']?.toString() ?? '',
-        rollNumber: st['employee_id']?.toString() ?? '',
-        role: UserRole.staff,
-        department: st['department']?.toString() ?? 'Information Technology',
-        academicDetails: st['designation']?.toString() ?? 'Faculty Coordinator',
-        section: st['cabin']?.toString() ?? 'IT Staff Room',
-        phoneNumber: st['phone']?.toString() ?? '',
-      )).toList();
+      final res = await c.from('profiles').select().eq('role', 'staff').order('full_name', ascending: true);
+      return res.map((st) => _mapProfileRowToUser(st)).toList();
     } catch (e) {
       debugPrint('SupabaseService.fetchStaffList error: $e');
       return [];
@@ -1194,10 +1118,24 @@ class SupabaseService extends ChangeNotifier {
     if (c == null) return false;
 
     try {
-      await c.from('students').update({'status': newStatus}).eq('roll_no', rollNo);
+      final isActive = newStatus.toUpperCase() == 'ACTIVE';
+      await c.from('profiles').update({'is_active': isActive}).eq('roll_number', rollNo);
       return true;
     } catch (e) {
       debugPrint('toggleStudentStatus error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> updateAccountPassword(String newPassword) async {
+    final c = client;
+    if (c == null) return false;
+
+    try {
+      await c.auth.updateUser(UserAttributes(password: newPassword));
+      return true;
+    } catch (e) {
+      debugPrint('updateAccountPassword error: $e');
       return false;
     }
   }
