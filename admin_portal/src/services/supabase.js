@@ -919,6 +919,66 @@ class SupabaseAdminService {
     if (data && data.error) throw new Error(data.error);
     return data;
   }
+
+  // ─── User Sessions & Live Presence Monitoring ───
+  async fetchActiveSessions() {
+    await this.ensureAdminSession();
+    const { data, error } = await this.client
+      .from('user_sessions')
+      .select('*')
+      .order('last_active_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Calculate live status: considered online if marked online AND active within last 2 minutes
+    const now = Date.now();
+    const TWO_MINUTES_MS = 2 * 60 * 1000;
+
+    return (data || []).map((session) => {
+      const lastActiveMs = session.last_active_at ? new Date(session.last_active_at).getTime() : 0;
+      const isRecentlyActive = (now - lastActiveMs) < TWO_MINUTES_MS;
+      return {
+        ...session,
+        is_live_now: Boolean(session.is_online && isRecentlyActive),
+      };
+    });
+  }
+
+  async getSessionMetrics() {
+    const sessions = await this.fetchActiveSessions();
+    const totalSessions = sessions.length;
+    const onlineNow = sessions.filter((s) => s.is_live_now).length;
+    const studentsOnline = sessions.filter((s) => s.is_live_now && s.role === 'student').length;
+    const staffOnline = sessions.filter((s) => s.is_live_now && (s.role === 'staff' || s.role === 'admin')).length;
+    const totalStudentsLoggedIn = sessions.filter((s) => s.role === 'student').length;
+
+    return {
+      totalSessions,
+      onlineNow,
+      studentsOnline,
+      staffOnline,
+      totalStudentsLoggedIn,
+      sessions,
+    };
+  }
+
+  subscribeToSessions(onUpdate) {
+    const channelName = `sessions_live_${Date.now()}`;
+    const channel = this.client
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'user_sessions' },
+        (payload) => {
+          if (onUpdate) onUpdate(payload);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      this.client.removeChannel(channel);
+    };
+  }
 }
 
 export const supabaseAdmin = new SupabaseAdminService();

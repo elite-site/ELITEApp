@@ -10,6 +10,7 @@ import '../core/services/supabase_service.dart';
 class AppState extends ChangeNotifier {
   final SupabaseService _supabaseService;
   Timer? _syncTimer;
+  Timer? _heartbeatTimer;
 
   UserModel? _currentUser;
   List<EventModel> _events = MockRepository.getInitialEvents();
@@ -44,6 +45,13 @@ class AppState extends ChangeNotifier {
         syncFromSupabase();
       }
     });
+
+    // 3. Live Presence Heartbeat (every 45 seconds while active)
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+      if (isLoggedIn && _currentUser != null && _currentUser!.id.isNotEmpty) {
+        _supabaseService.updateSessionHeartbeat(_currentUser!.id);
+      }
+    });
   }
 
   void _setupRealtimeSubscription() {
@@ -58,6 +66,7 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _syncTimer?.cancel();
+    _heartbeatTimer?.cancel();
     super.dispose();
   }
 
@@ -85,6 +94,7 @@ class AppState extends ChangeNotifier {
         if (profile != null && profile.id.isNotEmpty) {
           _currentUser = profile;
           _setupRealtimeSubscription();
+          _supabaseService.recordUserSession(user: profile);
           await syncFromSupabase();
           debugPrint('AppState: Successfully restored session for ${profile.name} (${profile.role})');
         } else {
@@ -195,6 +205,7 @@ class AppState extends ChangeNotifier {
         }
 
         _setupRealtimeSubscription();
+        _supabaseService.recordUserSession(user: profile);
         await syncFromSupabase();
         _isLoadingFromSupabase = false;
         notifyListeners();
@@ -227,6 +238,9 @@ class AppState extends ChangeNotifier {
     }
 
     try {
+      if (_currentUser != null && _currentUser!.id.isNotEmpty) {
+        await _supabaseService.endUserSession(_currentUser!.id);
+      }
       await SupabaseService.client?.auth.signOut();
     } catch (_) {}
     _currentUser = null;

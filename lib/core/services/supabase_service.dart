@@ -71,6 +71,71 @@ class SupabaseService extends ChangeNotifier {
     }
   }
 
+  // ─── Live Presence & User Sessions ──────────────────────────────────────────
+
+  Future<void> recordUserSession({
+    required UserModel user,
+    String platform = 'Android',
+    String deviceInfo = 'Android Mobile',
+  }) async {
+    final c = client;
+    if (c == null || user.id.isEmpty) return;
+
+    try {
+      await c.from('user_sessions').upsert({
+        'user_id': user.id,
+        'roll_number': user.rollNumber,
+        'full_name': user.name,
+        'role': user.role.name.toLowerCase(),
+        'department': user.department,
+        'year': user.yearLevel,
+        'section': user.section,
+        'platform': platform,
+        'device_info': deviceInfo,
+        'is_online': true,
+        'last_active_at': DateTime.now().toUtc().toIso8601String(),
+        'login_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'user_id,platform');
+      debugPrint('⚡ SupabaseService: Recorded live active session for ${user.name} (${user.rollNumber})');
+    } catch (e) {
+      debugPrint('SupabaseService.recordUserSession error: $e');
+    }
+  }
+
+  Future<void> updateSessionHeartbeat(String userId, {String platform = 'Android'}) async {
+    final c = client;
+    if (c == null || userId.isEmpty) return;
+
+    try {
+      await c.from('user_sessions')
+          .update({
+            'is_online': true,
+            'last_active_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('user_id', userId)
+          .eq('platform', platform);
+    } catch (e) {
+      debugPrint('SupabaseService.updateSessionHeartbeat error: $e');
+    }
+  }
+
+  Future<void> endUserSession(String userId, {String platform = 'Android'}) async {
+    final c = client;
+    if (c == null || userId.isEmpty) return;
+
+    try {
+      await c.from('user_sessions')
+          .update({
+            'is_online': false,
+            'last_active_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('user_id', userId)
+          .eq('platform', platform);
+      debugPrint('⚡ SupabaseService: Ended active session for user $userId');
+    } catch (e) {
+      debugPrint('SupabaseService.endUserSession error: $e');
+    }
+  }
 
   // ─── User Profile & Role Resolution ─────────────────────────────────────────
 

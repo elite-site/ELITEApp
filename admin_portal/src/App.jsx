@@ -11,6 +11,7 @@ import BroadcastView from './views/BroadcastView';
 import ReportsView from './views/ReportsView';
 import SettingsView from './views/SettingsView';
 import DatabaseView from './views/DatabaseView';
+import LiveSessionsView from './views/LiveSessionsView';
 import ErrorBoundary from './components/ErrorBoundary';
 import supabaseAdmin from './services/supabase';
 
@@ -28,6 +29,7 @@ export default function App() {
     openPolls: 0,
     attendanceToday: 0,
     openTickets: 0,
+    onlineNow: 0,
   });
   const [events, setEvents] = useState([]);
   const [recentAttendance, setRecentAttendance] = useState([]);
@@ -44,8 +46,14 @@ export default function App() {
       const ping = await supabaseAdmin.testConnection();
       setIsConnected(ping.ok);
 
-      const m = await supabaseAdmin.getDashboardMetrics();
-      setMetrics(m);
+      const [m, sessionM] = await Promise.all([
+        supabaseAdmin.getDashboardMetrics(),
+        supabaseAdmin.getSessionMetrics().catch(() => ({ onlineNow: 0 })),
+      ]);
+      setMetrics({
+        ...m,
+        onlineNow: sessionM?.onlineNow ?? 0,
+      });
 
       const evs = await supabaseAdmin.getEvents();
       setEvents(evs);
@@ -63,17 +71,21 @@ export default function App() {
   useEffect(() => {
     fetchGlobalData();
 
-    // Real-time synchronization with Supabase events and registrations
+    // Real-time synchronization with Supabase events, registrations, and live sessions
     const unsubRegs = supabaseAdmin.subscribeToRegistrations(() => {
       fetchGlobalData();
     });
     const unsubEvents = supabaseAdmin.subscribeToEvents(() => {
       fetchGlobalData();
     });
+    const unsubSessions = supabaseAdmin.subscribeToSessions(() => {
+      fetchGlobalData();
+    });
 
     return () => {
       unsubRegs();
       unsubEvents();
+      unsubSessions();
     };
   }, []);
 
@@ -124,6 +136,8 @@ export default function App() {
                 }}
               />
             )}
+
+            {activeTab === 'live_sessions' && <LiveSessionsView />}
 
             {activeTab === 'database' && <DatabaseView />}
 
