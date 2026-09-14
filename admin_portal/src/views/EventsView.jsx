@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, ArrowLeft, ExternalLink, Trash2, Edit } from 'lucide-react';
+import { Plus, ArrowLeft, ExternalLink, Trash2, Edit, Globe } from 'lucide-react';
 import supabaseAdmin from '../services/supabase';
 import Modal from '../components/Modal';
 
@@ -37,6 +37,7 @@ export default function EventsView({ isCreateOpen, setIsCreateOpen }) {
     voting_start: '',
     voting_end: '',
     voting_eligible_roles: 'STUDENT,STAFF',
+    status: 'published',
   });
 
   const selectedEventRef = useRef(selectedEvent);
@@ -135,6 +136,7 @@ export default function EventsView({ isCreateOpen, setIsCreateOpen }) {
       voting_start: '',
       voting_end: '',
       voting_eligible_roles: 'STUDENT,STAFF',
+      status: 'published',
     });
     setIsCreateOpen(true);
   };
@@ -159,6 +161,7 @@ export default function EventsView({ isCreateOpen, setIsCreateOpen }) {
       voting_start: ev.voting_start ? ev.voting_start.substring(0, 16) : '',
       voting_end: ev.voting_end ? ev.voting_end.substring(0, 16) : '',
       voting_eligible_roles: ev.voting_eligible_roles || 'STUDENT,STAFF',
+      status: ev.status || 'published',
     });
     setIsCreateOpen(true);
   };
@@ -192,6 +195,7 @@ export default function EventsView({ isCreateOpen, setIsCreateOpen }) {
           ? new Date(formData.voting_end).toISOString()
           : null,
         voting_eligible_roles: formData.voting_eligible_roles,
+        status: formData.status || 'published',
       };
 
       if (editingId) {
@@ -222,6 +226,27 @@ export default function EventsView({ isCreateOpen, setIsCreateOpen }) {
       fetchEvents();
     } catch (err) {
       alert('Error deleting event: ' + err.message);
+    }
+  };
+
+  const handleTogglePublishEvent = async (event) => {
+    const isPub = (event.status || '').toLowerCase() === 'published';
+    const action = isPub ? 'unpublish' : 'publish';
+    if (!window.confirm(`Are you sure you want to ${action} event "${event.title}"?`)) return;
+    try {
+      if (isPub) {
+        await supabaseAdmin.unpublishEvent(event.id);
+      } else {
+        await supabaseAdmin.publishEvent(event.id);
+      }
+      await fetchEvents();
+      if (selectedEvent && selectedEvent.id === event.id) {
+        const updated = await supabaseAdmin.getEvents();
+        const cur = updated.find((e) => e.id === event.id);
+        if (cur) setSelectedEvent(cur);
+      }
+    } catch (err) {
+      alert(`Error updating event status: ${err.message}`);
     }
   };
 
@@ -263,6 +288,12 @@ export default function EventsView({ isCreateOpen, setIsCreateOpen }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => handleTogglePublishEvent(selectedEvent)}
+              className={`btn btn-sm ${selectedEvent.status === 'published' ? 'btn-secondary' : 'btn-primary'}`}
+            >
+              <Globe size={13} /> {selectedEvent.status === 'published' ? 'Unpublish Event' : 'Publish Event'}
+            </button>
             <button onClick={() => handleOpenEdit(selectedEvent)} className="btn btn-secondary btn-sm">
               <Edit size={13} /> Edit Event
             </button>
@@ -292,10 +323,10 @@ export default function EventsView({ isCreateOpen, setIsCreateOpen }) {
           </div>
 
           <div className="stat-box">
-            <div className="stat-box-label">Registration Status</div>
+            <div className="stat-box-label">Status</div>
             <div style={{ marginTop: '4px' }}>
-              <span className={`badge ${!isClosed ? 'badge-open' : 'badge-closed'}`}>
-                {!isClosed ? 'Open' : 'Closed'}
+              <span className={`badge ${selectedEvent.status === 'published' ? 'badge-success' : selectedEvent.status === 'ongoing' ? 'badge-open' : 'badge-neutral'}`}>
+                {selectedEvent.status ? (selectedEvent.status.charAt(0).toUpperCase() + selectedEvent.status.slice(1)) : 'Draft'}
               </span>
             </div>
           </div>
@@ -615,17 +646,26 @@ export default function EventsView({ isCreateOpen, setIsCreateOpen }) {
                       {ev.registered_count ?? 0} / {ev.max_capacity}
                     </td>
                     <td>
-                      <span className={`badge ${!isClosed ? 'badge-open' : 'badge-closed'}`}>
-                        {!isClosed ? 'Open' : 'Closed'}
+                      <span className={`badge ${ev.status === 'published' ? 'badge-success' : ev.status === 'ongoing' ? 'badge-open' : 'badge-neutral'}`}>
+                        {ev.status ? (ev.status.charAt(0).toUpperCase() + ev.status.slice(1)) : 'Draft'}
                       </span>
                     </td>
                     <td>
-                      <button
-                        onClick={() => loadEventDetails(ev)}
-                        className="btn btn-secondary btn-sm"
-                      >
-                        View
-                      </button>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button
+                          onClick={() => loadEventDetails(ev)}
+                          className="btn btn-secondary btn-sm"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => handleTogglePublishEvent(ev)}
+                          className={`btn btn-sm ${ev.status === 'published' ? 'btn-secondary' : 'btn-primary'}`}
+                          title={ev.status === 'published' ? 'Unpublish to draft' : 'Publish for students'}
+                        >
+                          <Globe size={13} /> {ev.status === 'published' ? 'Unpublish' : 'Publish'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -701,13 +741,18 @@ export default function EventsView({ isCreateOpen, setIsCreateOpen }) {
             </div>
 
             <div className="form-group">
-              <label>Max Capacity</label>
-              <input
-                type="number"
+              <label>Publication Status</label>
+              <select
                 className="form-control"
-                value={formData.max_capacity}
-                onChange={(e) => setFormData({ ...formData, max_capacity: e.target.value })}
-              />
+                value={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+              >
+                <option value="published">Published (Visible to Students)</option>
+                <option value="draft">Draft (Admin Only)</option>
+                <option value="ongoing">Ongoing (Live)</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
             </div>
           </div>
 

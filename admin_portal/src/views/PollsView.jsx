@@ -45,6 +45,24 @@ export default function PollsView() {
     };
   }, []);
 
+  const handleOpenResults = async (poll) => {
+    setSelectedPoll(poll);
+    try {
+      const res = await supabaseAdmin.getPollResults(poll.id);
+      if (res) {
+        setSelectedPoll((prev) => ({
+          ...(prev || poll),
+          total_votes: res.totalVotes,
+          totalVotes: res.totalVotes,
+          options: res.options,
+          poll_options: res.options,
+        }));
+      }
+    } catch (e) {
+      console.error('Error fetching poll results:', e);
+    }
+  };
+
   const handleImageUpload = async (idx, file) => {
     if (!file) return;
     setUploadingIdx(idx);
@@ -157,7 +175,7 @@ export default function PollsView() {
                     <td>
                       <div style={{ display: 'flex', gap: '6px' }}>
                         <button
-                          onClick={() => setSelectedPoll(poll)}
+                          onClick={() => handleOpenResults(poll)}
                           className="btn btn-secondary btn-sm"
                         >
                           <Eye size={13} /> View Results
@@ -214,7 +232,7 @@ export default function PollsView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(selectedPoll.options || []).map((opt, i) => {
+                  {(selectedPoll.options || selectedPoll.poll_options || []).map((opt, i) => {
                     const total = selectedPoll.total_votes ?? selectedPoll.totalVotes ?? 0;
                     const votes = opt.votes ?? opt.vote_count ?? 0;
                     const pct = total > 0 ? ((votes / total) * 100).toFixed(1) : '0.0';

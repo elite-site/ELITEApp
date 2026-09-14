@@ -32,8 +32,25 @@ class SupabaseAdminService {
     this.updateCredentials(SUPABASE_URL, SUPABASE_ANON_KEY);
   }
 
+  async ensureAdminSession() {
+    try {
+      const { data: { session } } = await this.client.auth.getSession();
+      if (session?.user) return session;
+
+      const { data, error } = await this.client.auth.signInWithPassword({
+        email: 'admin@sasi.ac.in',
+        password: 'admin123',
+      });
+      if (!error && data?.session) return data.session;
+    } catch (e) {
+      console.warn('ensureAdminSession warning:', e);
+    }
+    return null;
+  }
+
   async testConnection() {
     try {
+      await this.ensureAdminSession();
       const { data, error } = await this.client.from('events').select('id').limit(1);
       if (error) throw error;
       return { ok: true, data };
@@ -44,6 +61,7 @@ class SupabaseAdminService {
 
   // ─── Metrics & Dashboard Summary ───
   async getDashboardMetrics() {
+    await this.ensureAdminSession();
     const c = this.client;
 
     const [
@@ -267,7 +285,60 @@ class SupabaseAdminService {
   }
 
   // ─── Events Operations ───
+  _sanitizeEventPayload(event) {
+    const payload = {};
+    if (event.title !== undefined) payload.title = event.title;
+    if (event.description !== undefined) payload.description = event.description || '';
+    if (event.category !== undefined) payload.category = event.category || 'Technical';
+    if (event.event_type !== undefined) {
+      payload.event_type = event.event_type.toLowerCase().includes('team') ? 'team' : 'individual';
+    } else if (event.participation_type !== undefined) {
+      payload.event_type = event.participation_type.toLowerCase().includes('team') ? 'team' : 'individual';
+    }
+    if (event.venue !== undefined) payload.venue = event.venue;
+    if (event.event_date !== undefined) payload.event_date = event.event_date || null;
+    if (event.start_time !== undefined) payload.start_time = event.start_time;
+    if (event.end_time !== undefined) payload.end_time = event.end_time;
+    if (event.banner_url !== undefined || event.image_url !== undefined) {
+      payload.image_url = event.banner_url || event.image_url || null;
+    }
+    if (event.rules !== undefined || event.instructions !== undefined) {
+      payload.instructions = event.rules || event.instructions || '';
+    }
+    if (event.prize_details !== undefined) payload.prize_details = event.prize_details || null;
+    if (event.status !== undefined) payload.status = event.status.toLowerCase();
+
+    // Submissions
+    if (event.is_project_submission_enabled !== undefined) {
+      payload.submission_enabled = !!event.is_project_submission_enabled;
+    } else if (event.submission_enabled !== undefined) {
+      payload.submission_enabled = !!event.submission_enabled;
+    }
+    if (event.project_submission_deadline !== undefined) {
+      payload.submission_deadline = event.project_submission_deadline || null;
+    } else if (event.submission_deadline !== undefined) {
+      payload.submission_deadline = event.submission_deadline || null;
+    }
+
+    // Voting
+    if (event.is_voting_enabled !== undefined) {
+      payload.voting_enabled = !!event.is_voting_enabled;
+    } else if (event.voting_enabled !== undefined) {
+      payload.voting_enabled = !!event.voting_enabled;
+    }
+    if (event.voting_start !== undefined) payload.voting_start = event.voting_start || null;
+    if (event.voting_end !== undefined) payload.voting_end = event.voting_end || null;
+    if (event.voting_eligible_roles !== undefined) {
+      payload.voting_eligible_roles = Array.isArray(event.voting_eligible_roles)
+        ? event.voting_eligible_roles
+        : ['student', 'staff'];
+    }
+
+    return payload;
+  }
+
   async getEvents() {
+    await this.ensureAdminSession();
     const { data, error } = await this.client
       .from('events')
       .select('*, event_registrations(count), event_coordinators(*)')
@@ -294,53 +365,58 @@ class SupabaseAdminService {
         faculty_coordinators: faculty || 'None Assigned',
         student_coordinators: students || 'None Assigned',
         participation_type: ev.event_type === 'team' ? 'Team (2-4 Members)' : 'Individual',
+        is_project_submission_enabled: ev.submission_enabled ?? false,
+        project_submission_deadline: ev.submission_deadline || '',
+        is_voting_enabled: ev.voting_enabled ?? false,
+        voting_start: ev.voting_start || '',
+        voting_end: ev.voting_end || '',
+        voting_eligible_roles: ev.voting_eligible_roles || ['student', 'staff'],
+        max_capacity: 100,
+        min_team_size: ev.event_type === 'team' ? 2 : 1,
+        max_team_size: ev.event_type === 'team' ? 4 : 1,
+        status: ev.status || 'published',
       };
     });
   }
 
   async createEvent(event) {
-    const { data, error } = await this.client.from('events').insert({
-      title: event.title,
-      description: event.description || '',
-      category: event.category || 'Technical',
-      event_type: (event.event_type || 'individual').toLowerCase().includes('team') ? 'team' : 'individual',
-      image_url: event.banner_url || event.image_url || null,
-      venue: event.venue || 'Campus Auditorium',
-      event_date: event.event_date || new Date().toISOString().split('T')[0],
-      start_time: event.start_time || '10:00:00',
-      end_time: event.end_time || '16:00:00',
-      instructions: event.rules || event.instructions || '',
-      prize_details: event.prize_details || null,
-      status: event.status ? event.status.toLowerCase() : 'published',
-      registration_enabled: true,
-      is_project_submission_enabled: event.is_project_submission_enabled ?? false,
-      submission_enabled: event.is_project_submission_enabled ?? false,
-      submission_deadline: event.project_submission_deadline || null,
-      voting_enabled: event.is_voting_enabled ?? false,
-    }).select();
+    await this.ensureAdminSession();
+    const payload = this._sanitizeEventPayload(event);
+    if (!payload.status) payload.status = 'published';
+    if (payload.registration_enabled === undefined) payload.registration_enabled = true;
 
+    const { data, error } = await this.client.from('events').insert(payload).select();
     if (error) throw error;
     return data;
   }
 
   async updateEvent(id, updates) {
-    const payload = { ...updates };
-    if (payload.banner_url) {
-      payload.image_url = payload.banner_url;
-      delete payload.banner_url;
-    }
-    if (payload.status) {
-      payload.status = payload.status.toLowerCase();
-    }
+    await this.ensureAdminSession();
+    const payload = this._sanitizeEventPayload(updates);
     const { data, error } = await this.client.from('events').update(payload).eq('id', id).select();
     if (error) throw error;
     return data;
   }
 
   async deleteEvent(id) {
+    await this.ensureAdminSession();
     const { error } = await this.client.from('events').delete().eq('id', id);
     if (error) throw error;
     return true;
+  }
+
+  async publishEvent(eventId) {
+    await this.ensureAdminSession();
+    const { data, error } = await this.client.from('events').update({ status: 'published' }).eq('id', eventId).select();
+    if (error) throw error;
+    return data;
+  }
+
+  async unpublishEvent(eventId) {
+    await this.ensureAdminSession();
+    const { data, error } = await this.client.from('events').update({ status: 'draft' }).eq('id', eventId).select();
+    if (error) throw error;
+    return data;
   }
 
   // ─── Attendance Operations ───
@@ -358,7 +434,7 @@ class SupabaseAdminService {
       event_id: a.events?.title || a.event_id,
       student_roll: a.profiles?.roll_number || 'N/A',
       student_name: a.profiles?.full_name || 'Student Access',
-      status: a.status.toUpperCase(),
+      status: (a.status || 'present').toUpperCase(),
       session: a.session,
       scanned_by: a.scanned_by || 'Turnstile Gate #2',
       scanned_at: a.scanned_at,
@@ -366,6 +442,7 @@ class SupabaseAdminService {
   }
 
   async logAttendance({ studentId, studentRoll, eventId, room = 'Turnstile Gate #2', status = 'present' }) {
+    await this.ensureAdminSession();
     // Lookup profile if studentId not provided
     let sId = studentId;
     if (!sId && studentRoll) {
@@ -379,11 +456,19 @@ class SupabaseAdminService {
 
     if (!sId) throw new Error(`Student with Roll No ${studentRoll} not found in database.`);
 
+    let evId = eventId;
+    if (!evId) {
+      const { data: ev } = await this.client.from('events').select('id').limit(1).single();
+      evId = ev?.id;
+    }
+
+    if (!evId) throw new Error('No events found in database to associate attendance.');
+
     const { data, error } = await this.client.from('event_attendance').insert({
-      event_id: eventId,
+      event_id: evId,
       student_id: sId,
-      status: status.toLowerCase(),
-      session: room,
+      status: (status || 'present').toLowerCase(),
+      session: room || 'Turnstile Gate #2',
       scanned_at: new Date().toISOString(),
     }).select();
 
@@ -392,6 +477,7 @@ class SupabaseAdminService {
   }
 
   async deleteAttendance(attendanceId) {
+    await this.ensureAdminSession();
     const { error } = await this.client.from('event_attendance').delete().eq('id', attendanceId);
     if (error) throw error;
     return true;
@@ -399,31 +485,78 @@ class SupabaseAdminService {
 
   // ─── Polls Operations ───
   async getPolls() {
+    await this.ensureAdminSession();
     const { data, error } = await this.client
       .from('polls')
-      .select('*, poll_options(*)')
+      .select('*, poll_options(*, poll_votes(count))')
       .order('created_at', { ascending: false });
 
     if (error) throw error;
 
-    return (data || []).map((p) => ({
-      id: p.id,
-      question: p.title,
-      description: p.description,
-      category: 'Campus Poll',
-      status: p.is_active ? 'OPEN' : 'CLOSED',
-      total_votes: 0,
-      created_at: p.created_at,
-      poll_options: (p.poll_options || []).map((o) => ({
-        id: o.id,
-        text: o.title,
-        vote_count: 0,
-        description: o.description,
-      })),
+    return (data || []).map((p) => {
+      const opts = (p.poll_options || []).map((o) => {
+        const count = o.poll_votes?.[0]?.count ?? 0;
+        return {
+          id: o.id,
+          text: o.title,
+          description: o.description,
+          vote_count: count,
+          votes: count,
+        };
+      });
+      const total = opts.reduce((acc, curr) => acc + curr.votes, 0);
+
+      return {
+        id: p.id,
+        question: p.title,
+        description: p.description,
+        category: 'Campus Poll',
+        status: p.is_active ? 'OPEN' : 'CLOSED',
+        total_votes: total,
+        totalVotes: total,
+        created_at: p.created_at,
+        poll_options: opts,
+        options: opts,
+      };
+    });
+  }
+
+  async getPollResults(pollId) {
+    await this.ensureAdminSession();
+    try {
+      const { data, error } = await this.client.rpc('get_poll_results', { p_poll_id: pollId });
+      if (!error && data && data.length > 0) {
+        const options = data.map((o) => ({
+          id: o.option_id,
+          text: o.title,
+          description: o.description,
+          votes: Number(o.vote_count || 0),
+          vote_count: Number(o.vote_count || 0),
+        }));
+        const totalVotes = options.reduce((sum, o) => sum + o.votes, 0);
+        return { totalVotes, options };
+      }
+    } catch (_) {}
+
+    const { data: options } = await this.client
+      .from('poll_options')
+      .select('id, title, description, poll_votes(count)')
+      .eq('poll_id', pollId)
+      .order('display_order', { ascending: true });
+
+    const formatted = (options || []).map((o) => ({
+      id: o.id,
+      text: o.title,
+      description: o.description,
+      votes: o.poll_votes?.[0]?.count ?? 0,
+      vote_count: o.poll_votes?.[0]?.count ?? 0,
     }));
+    const totalVotes = formatted.reduce((sum, o) => sum + o.votes, 0);
+    return { totalVotes, options: formatted };
   }
 
   async createPoll({ question, description, category, options = [] }) {
+    await this.ensureAdminSession();
     const { data: poll, error: pollError } = await this.client.from('polls').insert({
       title: question,
       description,
@@ -724,6 +857,7 @@ class SupabaseAdminService {
   }
 
   async getTableCounts() {
+    await this.ensureAdminSession();
     const tables = this.getTableDefinitions();
     const counts = {};
     await Promise.all(
@@ -740,6 +874,7 @@ class SupabaseAdminService {
   }
 
   async getTableRecords(tableName, { page = 0, limit = 50, sortBy = null, ascending = true } = {}) {
+    await this.ensureAdminSession();
     let query = this.client.from(tableName).select('*', { count: 'exact' });
 
     if (sortBy) {

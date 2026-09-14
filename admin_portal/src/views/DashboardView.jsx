@@ -79,8 +79,8 @@ export default function DashboardView({
                       {ev.registered_count ?? 0} / {ev.max_capacity}
                     </td>
                     <td>
-                      <span className={`badge ${ev.status === 'UPCOMING' || ev.status === 'ONGOING' ? 'badge-open' : 'badge-neutral'}`}>
-                        {ev.status || 'Active'}
+                      <span className={`badge ${(ev.status || '').toLowerCase() === 'published' ? 'badge-success' : (ev.status || '').toLowerCase() === 'ongoing' ? 'badge-open' : 'badge-neutral'}`}>
+                        {ev.status ? (ev.status.charAt(0).toUpperCase() + ev.status.slice(1)) : 'Active'}
                       </span>
                     </td>
                   </tr>

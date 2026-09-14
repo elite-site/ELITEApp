@@ -220,7 +220,7 @@ class SupabaseService extends ChangeNotifier {
     try {
       final res = await c
           .from('events')
-          .select()
+          .select('*, event_coordinators(*)')
           .order('event_date', ascending: true);
 
       final List<EventModel> list = [];
@@ -235,6 +235,28 @@ class SupabaseService extends ChangeNotifier {
             const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
             month = months[(mInt - 1).clamp(0, 11)];
             day = parts[2];
+          }
+        }
+
+        final coords = (row['event_coordinators'] as List<dynamic>?) ?? [];
+        String speakerText = 'Department Coordinators';
+        if (coords.isNotEmpty) {
+          final faculty = coords
+              .where((c) => (c as Map<String, dynamic>)['coordinator_type'] == 'faculty')
+              .map((c) => "${(c as Map<String, dynamic>)['coordinator_name'] ?? ''}${c['is_primary'] == true ? ' (Primary)' : ''}")
+              .where((s) => s.isNotEmpty)
+              .join(', ');
+          final students = coords
+              .where((c) => (c as Map<String, dynamic>)['coordinator_type'] == 'student')
+              .map((c) => (c as Map<String, dynamic>)['coordinator_name']?.toString() ?? '')
+              .where((s) => s.isNotEmpty)
+              .join(', ');
+          if (faculty.isNotEmpty && students.isNotEmpty) {
+            speakerText = 'Faculty: $faculty | Students: $students';
+          } else if (faculty.isNotEmpty) {
+            speakerText = 'Faculty: $faculty';
+          } else if (students.isNotEmpty) {
+            speakerText = 'Students: $students';
           }
         }
 
@@ -264,7 +286,7 @@ class SupabaseService extends ChangeNotifier {
           dateDay: day,
           time: '${row['start_time'] ?? '10:00:00'} - ${row['end_time'] ?? '17:00:00'}',
           venue: row['venue'] ?? 'Campus Auditorium',
-          speaker: 'Faculty & Student Coordinators',
+          speaker: speakerText,
           seatsLeft: 500,
           totalSeats: 500,
           isRegistered: false,

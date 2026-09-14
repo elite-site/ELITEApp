@@ -40,6 +40,7 @@ export default function App() {
   const fetchGlobalData = async () => {
     setIsRefreshing(true);
     try {
+      await supabaseAdmin.ensureAdminSession();
       const ping = await supabaseAdmin.testConnection();
       setIsConnected(ping.ok);
 

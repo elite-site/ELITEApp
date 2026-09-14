@@ -15,13 +15,10 @@ export default function ReportsView() {
           id,
           event_id,
           student_id,
-          student_roll,
-          student_name,
-          status,
+          registration_status,
           registered_at,
-          team_name,
-          is_team,
-          members,
+          profiles ( full_name, roll_number ),
+          teams ( team_name ),
           events ( title, event_date )
         `)
         .order('registered_at', { ascending: false });
@@ -33,10 +30,10 @@ export default function ReportsView() {
         r.id,
         `"${r.events?.title || r.event_id}"`,
         `"${r.events?.event_date || ''}"`,
-        `"${r.student_roll || ''}"`,
-        `"${r.team_name || r.student_name || r.student_id || ''}"`,
-        r.is_team ? 'Team' : 'Individual',
-        r.status || 'CONFIRMED',
+        `"${r.profiles?.roll_number || ''}"`,
+        `"${r.teams?.team_name || r.profiles?.full_name || r.student_id || ''}"`,
+        r.teams ? 'Team' : 'Individual',
+        r.registration_status || 'confirmed',
         `"${r.registered_at || ''}"`,
       ]);
 
@@ -101,14 +98,15 @@ export default function ReportsView() {
       const headers = ['Poll ID', 'Question', 'Category', 'Status', 'Option Text', 'Votes'];
       const rows = [];
       polls.forEach((p) => {
-        (p.options || []).forEach((opt) => {
+        const opts = p.options || p.poll_options || [];
+        opts.forEach((opt) => {
           rows.push([
             p.id,
             `"${p.question}"`,
             `"${p.category || ''}"`,
             p.status,
             `"${opt.text || ''}"`,
-            opt.votes ?? 0,
+            opt.votes ?? opt.vote_count ?? 0,
           ]);
         });
       });

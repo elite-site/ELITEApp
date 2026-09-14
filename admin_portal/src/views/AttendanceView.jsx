@@ -5,12 +5,14 @@ import Modal from '../components/Modal';
 
 export default function AttendanceView({ isCheckInOpen, setIsCheckInOpen }) {
   const [logs, setLogs] = useState([]);
+  const [events, setEvents] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
 
   // Manual Check-In Form
   const [checkInRoll, setCheckInRoll] = useState('');
   const [checkInName, setCheckInName] = useState('');
-  const [checkInEvent, setCheckInEvent] = useState('Campus Gate / Event Check-in');
+  const [checkInEventId, setCheckInEventId] = useState('');
+  const [checkInRoom, setCheckInRoom] = useState('IT Lab');
   const [checkInStatus, setCheckInStatus] = useState('PRESENT');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -28,6 +30,12 @@ export default function AttendanceView({ isCheckInOpen, setIsCheckInOpen }) {
 
   useEffect(() => {
     fetchLogs();
+    supabaseAdmin.getEvents().then((evs) => {
+      setEvents(evs || []);
+      if (evs && evs.length > 0) {
+        setCheckInEventId(evs[0].id);
+      }
+    }).catch(console.error);
   }, []);
 
   const handleManualCheckIn = async (e) => {
@@ -39,7 +47,8 @@ export default function AttendanceView({ isCheckInOpen, setIsCheckInOpen }) {
       await supabaseAdmin.logAttendance({
         studentRoll: checkInRoll.trim(),
         studentName: checkInName.trim() || 'Student Verified',
-        room: checkInEvent.trim(),
+        eventId: checkInEventId,
+        room: checkInRoom.trim() || 'Turnstile Gate #2',
         status: checkInStatus,
       });
       setIsCheckInOpen(false);
@@ -153,13 +162,29 @@ export default function AttendanceView({ isCheckInOpen, setIsCheckInOpen }) {
           </div>
 
           <div className="form-group">
-            <label>Event / Location</label>
+            <label>Event *</label>
+            <select
+              className="form-control"
+              value={checkInEventId}
+              onChange={(e) => setCheckInEventId(e.target.value)}
+              required
+            >
+              {events.map((ev) => (
+                <option key={ev.id} value={ev.id}>
+                  {ev.title} ({ev.event_date || 'Date TBD'})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label>Session / Location</label>
             <input
               type="text"
               className="form-control"
-              placeholder="e.g. Tech Quiz 2026, Lab 402"
-              value={checkInEvent}
-              onChange={(e) => setCheckInEvent(e.target.value)}
+              placeholder="e.g. IT Lab, Turnstile Gate #2"
+              value={checkInRoom}
+              onChange={(e) => setCheckInRoom(e.target.value)}
             />
           </div>
 
