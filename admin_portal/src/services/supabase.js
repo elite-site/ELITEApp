@@ -458,10 +458,139 @@ class SupabaseAdminService {
     return true;
   }
 
+  async uploadPollImage(file) {
+    const ext = file.name.split('.').pop();
+    const fileName = `poll_${Date.now()}_${Math.random().toString(36).substr(2, 6)}.${ext}`;
+    const { error } = await this.client.storage.from('poll-images').upload(fileName, file);
+    if (error) throw error;
+    const { data: { publicUrl } } = this.client.storage.from('poll-images').getPublicUrl(fileName);
+    return publicUrl;
+  }
+
   async deleteRegistration(registrationId) {
     const { error } = await this.client.from('event_registrations').delete().eq('id', registrationId);
     if (error) throw error;
     return true;
+  }
+
+  async getEventRegistrations(eventId) {
+    const { data, error } = await this.client
+      .from('event_registrations')
+      .select('*, profiles(id, full_name, roll_number), teams(*, team_members(*, profiles(id, full_name, roll_number)))')
+      .eq('event_id', eventId)
+      .order('registered_at', { ascending: false });
+
+    if (error) throw error;
+
+    return (data || []).map((r) => {
+      const isTeam = !!r.team_id;
+      const team = r.teams;
+      const members = team?.team_members?.map((tm) => ({
+        studentId: tm.student_id,
+        studentName: tm.profiles?.full_name || 'Member',
+        studentRoll: tm.profiles?.roll_number || '',
+        isLeader: tm.is_leader,
+      })) || [];
+
+      return {
+        id: r.id,
+        user_id: r.user_id,
+        student_name: r.profiles?.full_name || 'Student',
+        student_roll: r.profiles?.roll_number || '',
+        is_team_registration: isTeam,
+        team_name: team?.team_name || null,
+        members: members.length > 0 ? members : [{
+          studentId: r.user_id,
+          studentName: r.profiles?.full_name || 'Student',
+          studentRoll: r.profiles?.roll_number || '',
+          isLeader: true,
+        }],
+        registered_at: r.registered_at,
+      };
+    });
+  }
+
+  // ─── Project Submissions Operations ───
+  async getProjectSubmissions(eventId) {
+    const { data, error } = await this.client
+      .from('project_submissions')
+      .select('*, teams(team_name), profiles:submitted_by(full_name, roll_number), project_images(*)')
+      .eq('event_id', eventId)
+      .order('submitted_at', { ascending: false });
+
+    if (error) throw error;
+
+    return (data || []).map((p) => ({
+      id: p.id,
+      event_id: p.event_id,
+      team_id: p.team_id,
+      team_name: p.teams?.team_name || p.profiles?.full_name || 'Participant',
+      project_name: p.project_title || 'Untitled Project',
+      project_title: p.project_title || 'Untitled Project',
+      description: p.description || '',
+      problem_statement: p.problem_statement || '',
+      proposed_solution: p.proposed_solution || '',
+      technologies_used: p.technologies_used || [],
+      github_url: p.github_url || '',
+      live_demo_url: p.live_demo_url || '',
+      presentation_url: p.presentation_url || '',
+      status: (p.status || (p.is_published ? 'PUBLISHED' : 'PENDING')).toUpperCase(),
+      is_published: p.is_published || false,
+      submitted_at: p.submitted_at,
+      images: (p.project_images || []).map((img) => img.image_url),
+    }));
+  }
+
+  async publishProjectSubmission(submissionId) {
+    const { data, error } = await this.client
+      .from('project_submissions')
+      .update({ is_published: true, status: 'approved' })
+      .eq('id', submissionId)
+      .select();
+    if (error) throw error;
+    return data;
+  }
+
+  async unpublishProjectSubmission(submissionId) {
+    const { data, error } = await this.client
+      .from('project_submissions')
+      .update({ is_published: false, status: 'pending' })
+      .eq('id', submissionId)
+      .select();
+    if (error) throw error;
+    return data;
+  }
+
+  async getProjectVotingResults(eventId) {
+    try {
+      const { data: polls } = await this.client
+        .from('polls')
+        .select('id')
+        .eq('title', eventId)
+        .limit(1);
+
+      const pollId = polls?.[0]?.id;
+      if (!pollId) {
+        return { totalVotes: 0, projects: [] };
+      }
+
+      const { data: options } = await this.client
+        .from('poll_options')
+        .select('id, title, description, poll_votes(count)')
+        .eq('poll_id', pollId);
+
+      const projects = (options || []).map((o) => ({
+        id: o.id,
+        project_name: o.title,
+        team_name: o.description || 'Entry',
+        vote_count: o.poll_votes?.[0]?.count ?? 0,
+      }));
+
+      const totalVotes = projects.reduce((acc, curr) => acc + (curr.vote_count || 0), 0);
+      return { totalVotes, projects };
+    } catch (e) {
+      return { totalVotes: 0, projects: [] };
+    }
   }
 
   // ─── Realtime Subscriptions ───
@@ -491,6 +620,86 @@ class SupabaseAdminService {
       .subscribe();
 
     return () => this.client.removeChannel(channel);
+  }
+
+  subscribeToPollVotes(callback) {
+    const channelId = `admin_pvotes_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const channel = this.client
+      .channel(channelId)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'poll_votes' },
+        (payload) => callback(payload)
+      )
+      .subscribe();
+
+    return () => this.client.removeChannel(channel);
+  }
+
+  subscribeToProjectSubmissions(eventId, callback) {
+    const channelId = `admin_subs_${eventId}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const channel = this.client
+      .channel(channelId)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'project_submissions' },
+        (payload) => callback(payload)
+      )
+      .subscribe();
+
+    return () => this.client.removeChannel(channel);
+  }
+
+  subscribeToProjectVotes(eventId, callback) {
+    const channelId = `admin_pvotes_ev_${eventId}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const channel = this.client
+      .channel(channelId)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'poll_votes' },
+        (payload) => callback(payload)
+      )
+      .subscribe();
+
+    return () => this.client.removeChannel(channel);
+  }
+
+  // ─── Helpdesk Tickets Operations ───
+  async getTickets() {
+    try {
+      const { data, error } = await this.client.from('tickets').select('*');
+      if (!error && data) return data;
+    } catch (_) {}
+    return [];
+  }
+
+  async updateTicketStatus(ticketId, newStatus, mentor) {
+    try {
+      await this.client.from('tickets').update({ status: newStatus, mentor }).eq('id', ticketId);
+    } catch (_) {}
+    return true;
+  }
+
+  // ─── Notifications & Broadcasts ───
+  async getNotifications() {
+    try {
+      const { data, error } = await this.client.from('notifications').select('*').order('created_at', { ascending: false });
+      if (!error && data) return data;
+    } catch (_) {}
+    return [];
+  }
+
+  async broadcastNotification({ title, message, category, target_audience }) {
+    try {
+      await this.client.from('notifications').insert({
+        title,
+        message,
+        category,
+        target_audience,
+        created_at: new Date().toISOString(),
+      });
+    } catch (_) {}
+    return true;
   }
 
   // ─── Direct Database Management & Dynamic Table Operations ───
