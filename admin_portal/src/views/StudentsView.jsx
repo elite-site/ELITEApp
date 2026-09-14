@@ -41,16 +41,17 @@ export default function StudentsView() {
   const fetchStudents = async () => {
     setIsLoading(true);
     try {
-      const { students: data, total } = await supabaseAdmin.getStudents({
+      const res = await supabaseAdmin.getStudents({
         search,
         year: yearFilter,
         page,
         limit: 50,
       });
-      setStudents(data);
-      setTotalCount(total);
+      setStudents(res?.students || []);
+      setTotalCount(res?.total || 0);
     } catch (e) {
-      console.error(e);
+      console.error('Error fetching students:', e);
+      setStudents([]);
     } finally {
       setIsLoading(false);
     }
@@ -203,83 +204,88 @@ export default function StudentsView() {
             </tr>
           </thead>
           <tbody>
-            {students.map((student) => {
-              const isActive = student.status === 'ACTIVE';
-              return (
-                <tr key={student.roll_no}>
-                  <td>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: '600', color: 'var(--text-main)' }}>
-                      {student.roll_no}
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ fontWeight: '600' }}>{student.name}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                      {student.department || 'Information Technology'}
-                    </div>
-                  </td>
-                  <td>
-                    <span className="badge badge-info">
-                      {student.year_level} • Sec {student.section || 'B'}
-                    </span>
-                  </td>
-                  <td style={{ color: 'var(--text-muted)' }}>{student.email || '—'}</td>
-                  <td>
-                    <button
-                      onClick={() => handleToggleStatus(student)}
-                      className={`badge ${isActive ? 'badge-success' : 'badge-danger'}`}
-                      style={{ border: 'none', cursor: 'pointer', padding: '4px 10px' }}
-                      title="Click to toggle active/inactive"
-                    >
-                      {isActive ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
-                      {student.status || 'ACTIVE'}
-                    </button>
-                  </td>
-                  <td>
-                    <button
-                      onClick={() => {
-                        setSelectedStudent(student);
-                        setIsQrOpen(true);
-                      }}
-                      className="btn-icon"
-                      style={{ width: '32px', height: '32px' }}
-                      title="View Digital Pass QR"
-                    >
-                      <QrCode size={16} />
-                    </button>
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', gap: '6px' }}>
-                      <button
-                        onClick={() => {
-                          setFormData({
-                            roll_no: student.roll_no,
-                            name: student.name,
-                            email: student.email || '',
-                            department: student.department || 'Information Technology',
-                            year_level: student.year_level || '3rd Year',
-                            section: student.section || 'B',
-                            status: student.status || 'ACTIVE',
-                          });
-                          setIsAddOpen(true);
-                        }}
-                        className="btn-icon"
-                        style={{ width: '32px', height: '32px' }}
-                        title="Edit Student"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {students.length === 0 && !isLoading && (
+            {isLoading ? (
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                <td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                  Loading students from database...
+                </td>
+              </tr>
+            ) : (students || []).length === 0 ? (
+              <tr>
+                <td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                   No students found matching the query.
                 </td>
               </tr>
+            ) : (
+              (students || []).map((student) => {
+                const isActive = student.status === 'ACTIVE';
+                return (
+                  <tr key={student.roll_no || student.user_id}>
+                    <td>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: '600', color: 'var(--text-main)' }}>
+                        {student.roll_no}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: '600' }}>{student.name}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {student.department || 'Information Technology'}
+                      </div>
+                    </td>
+                    <td>
+                      <span className="badge badge-info">
+                        {student.year_level || '—'} {student.section ? `• Sec ${student.section}` : ''}
+                      </span>
+                    </td>
+                    <td style={{ color: 'var(--text-muted)' }}>{student.email || '—'}</td>
+                    <td>
+                      <button
+                        onClick={() => handleToggleStatus(student)}
+                        className={`badge ${isActive ? 'badge-success' : 'badge-danger'}`}
+                        style={{ border: 'none', cursor: 'pointer', padding: '4px 10px' }}
+                        title="Click to toggle active/inactive"
+                      >
+                        {isActive ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
+                        {student.status || 'ACTIVE'}
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => {
+                          setSelectedStudent(student);
+                          setIsQrOpen(true);
+                        }}
+                        className="btn-icon"
+                        title="View Digital Pass QR"
+                      >
+                        <QrCode size={15} />
+                      </button>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', gap: '6px' }}>
+                        <button
+                          onClick={() => {
+                            setFormData({
+                              roll_no: student.roll_no,
+                              name: student.name,
+                              email: student.email || '',
+                              department: student.department || 'Information Technology',
+                              year_level: student.year_level || '3rd Year',
+                              section: student.section || 'B',
+                              status: student.status || 'ACTIVE',
+                            });
+                            setIsAddOpen(true);
+                          }}
+                          className="btn-icon"
+                          title="Edit Student"
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

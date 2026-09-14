@@ -10,6 +10,7 @@ import PollsView from './views/PollsView';
 import BroadcastView from './views/BroadcastView';
 import ReportsView from './views/ReportsView';
 import SettingsView from './views/SettingsView';
+import ErrorBoundary from './components/ErrorBoundary';
 import supabaseAdmin from './services/supabase';
 
 export default function App() {
@@ -97,59 +98,62 @@ export default function App() {
         />
 
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          {activeTab === 'dashboard' && (
-            <DashboardView
-              metrics={metrics}
-              events={events}
-              recentAttendance={recentAttendance}
-              onNavigate={setActiveTab}
-              onOpenNewEvent={() => {
-                setActiveTab('events');
-                setIsNewEventOpen(true);
-              }}
-              onOpenBroadcast={() => {
-                setActiveTab('notifications');
-                setIsBroadcastOpen(true);
-              }}
-              onOpenCheckIn={() => {
-                setActiveTab('attendance');
-                setIsCheckInOpen(true);
-              }}
-            />
-          )}
+          <ErrorBoundary>
+            {activeTab === 'dashboard' && (
+              <DashboardView
+                metrics={metrics}
+                events={events}
+                recentAttendance={recentAttendance}
+                isLoading={isRefreshing}
+                onNavigate={setActiveTab}
+                onOpenNewEvent={() => {
+                  setActiveTab('events');
+                  setIsNewEventOpen(true);
+                }}
+                onOpenBroadcast={() => {
+                  setActiveTab('notifications');
+                  setIsBroadcastOpen(true);
+                }}
+                onOpenCheckIn={() => {
+                  setActiveTab('attendance');
+                  setIsCheckInOpen(true);
+                }}
+              />
+            )}
 
-          {activeTab === 'students' && <StudentsView />}
+            {activeTab === 'students' && <StudentsView />}
 
-          {activeTab === 'staff' && <FacultyView />}
+            {activeTab === 'staff' && <FacultyView />}
 
-          {activeTab === 'events' && (
-            <EventsView
-              isCreateOpen={isNewEventOpen}
-              setIsCreateOpen={setIsNewEventOpen}
-            />
-          )}
+            {activeTab === 'events' && (
+              <EventsView
+                isCreateOpen={isNewEventOpen}
+                setIsCreateOpen={setIsNewEventOpen}
+              />
+            )}
 
-          {activeTab === 'attendance' && (
-            <AttendanceView
-              isCheckInOpen={isCheckInOpen}
-              setIsCheckInOpen={setIsCheckInOpen}
-            />
-          )}
+            {activeTab === 'attendance' && (
+              <AttendanceView
+                isCheckInOpen={isCheckInOpen}
+                setIsCheckInOpen={setIsCheckInOpen}
+              />
+            )}
 
-          {activeTab === 'polls' && <PollsView />}
+            {activeTab === 'polls' && <PollsView />}
 
-          {activeTab === 'reports' && <ReportsView />}
+            {activeTab === 'reports' && <ReportsView />}
 
-          {activeTab === 'notifications' && (
-            <BroadcastView
-              isBroadcastOpen={isBroadcastOpen}
-              setIsBroadcastOpen={setIsBroadcastOpen}
-            />
-          )}
+            {activeTab === 'notifications' && (
+              <BroadcastView
+                isBroadcastOpen={isBroadcastOpen}
+                setIsBroadcastOpen={setIsBroadcastOpen}
+              />
+            )}
 
-          {activeTab === 'settings' && (
-            <SettingsView onCredentialsUpdated={fetchGlobalData} />
-          )}
+            {activeTab === 'settings' && (
+              <SettingsView onCredentialsUpdated={fetchGlobalData} />
+            )}
+          </ErrorBoundary>
         </main>
       </div>
     </div>

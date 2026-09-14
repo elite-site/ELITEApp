@@ -4,6 +4,7 @@ export default function DashboardView({
   metrics = {},
   events = [],
   recentAttendance = [],
+  isLoading = false,
   onNavigate,
 }) {
   return (
@@ -52,7 +53,9 @@ export default function DashboardView({
           </button>
         </div>
 
-        {events.length === 0 ? (
+        {isLoading && events.length === 0 ? (
+          <div className="empty-state">Loading events from database...</div>
+        ) : events.length === 0 ? (
           <div className="empty-state">No events found</div>
         ) : (
           <div className="table-wrapper">
@@ -97,7 +100,9 @@ export default function DashboardView({
           </button>
         </div>
 
-        {recentAttendance.length === 0 ? (
+        {isLoading && recentAttendance.length === 0 ? (
+          <div className="empty-state">Loading attendance records...</div>
+        ) : recentAttendance.length === 0 ? (
           <div className="empty-state">No attendance records today</div>
         ) : (
           <div className="table-wrapper">
