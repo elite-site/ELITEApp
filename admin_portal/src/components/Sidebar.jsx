@@ -8,6 +8,7 @@ import {
   ScanLine,
   FileText,
   Bell,
+  Database,
   Settings,
   LogOut,
 } from 'lucide-react';
@@ -15,6 +16,7 @@ import {
 export default function Sidebar({ activeTab, setActiveTab, metrics, onLogout }) {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'database', label: 'Database', icon: Database, badge: '21' },
     { id: 'students', label: 'Students', icon: GraduationCap, badge: metrics?.students || null },
     { id: 'staff', label: 'Staff', icon: Users, badge: metrics?.staff || null },
     { id: 'events', label: 'Events', icon: CalendarDays, badge: metrics?.events || null },

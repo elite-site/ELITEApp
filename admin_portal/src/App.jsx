@@ -10,6 +10,7 @@ import PollsView from './views/PollsView';
 import BroadcastView from './views/BroadcastView';
 import ReportsView from './views/ReportsView';
 import SettingsView from './views/SettingsView';
+import DatabaseView from './views/DatabaseView';
 import ErrorBoundary from './components/ErrorBoundary';
 import supabaseAdmin from './services/supabase';
 
@@ -120,6 +121,8 @@ export default function App() {
                 }}
               />
             )}
+
+            {activeTab === 'database' && <DatabaseView />}
 
             {activeTab === 'students' && <StudentsView />}
 

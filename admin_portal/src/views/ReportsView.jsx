@@ -14,11 +14,13 @@ export default function ReportsView() {
         .select(`
           id,
           event_id,
-          user_id,
+          student_id,
+          student_roll,
+          student_name,
           status,
           registered_at,
           team_name,
-          is_team_registration,
+          is_team,
           members,
           events ( title, event_date )
         `)
@@ -26,13 +28,14 @@ export default function ReportsView() {
 
       if (error) throw error;
 
-      const headers = ['Registration ID', 'Event Title', 'Event Date', 'Team / User', 'Type', 'Status', 'Registered At'];
+      const headers = ['Registration ID', 'Event Title', 'Event Date', 'Roll No', 'Student / Team', 'Type', 'Status', 'Registered At'];
       const rows = (data || []).map((r) => [
         r.id,
         `"${r.events?.title || r.event_id}"`,
         `"${r.events?.event_date || ''}"`,
-        `"${r.team_name || r.user_id || ''}"`,
-        r.is_team_registration ? 'Team' : 'Individual',
+        `"${r.student_roll || ''}"`,
+        `"${r.team_name || r.student_name || r.student_id || ''}"`,
+        r.is_team ? 'Team' : 'Individual',
         r.status || 'CONFIRMED',
         `"${r.registered_at || ''}"`,
       ]);

@@ -67,7 +67,7 @@ class SupabaseAdminService {
 
     if (search && search.trim()) {
       const q = search.trim();
-      query = query.or(`roll_no.ilike.%${q}%,name.ilike.%${q}%,email.ilike.%${q}%`);
+      query = query.or(`roll_no.ilike.%${q}%,name.ilike.%${q}%`);
     }
 
     const from = page * limit;
@@ -77,32 +77,34 @@ class SupabaseAdminService {
       .range(from, to);
 
     if (error) throw error;
-    return { students: data || [], total: count || 0 };
+
+    const enriched = (data || []).map((s) => ({
+      ...s,
+      email: `${s.roll_no.toLowerCase()}@sasi.ac.in`,
+    }));
+
+    return { students: enriched, total: count || 0 };
   }
 
   async addStudent(student) {
-
-    // 1. Ensure user record exists
     const userId = student.user_id || `u_${student.roll_no.toLowerCase()}`;
     await this.client.from('users').upsert({
       id: userId,
       username: student.roll_no,
-      email: student.email,
+      email: student.email || `${student.roll_no.toLowerCase()}@sasi.ac.in`,
       role: 'STUDENT',
       department: student.department || 'Information Technology',
       status: student.status || 'ACTIVE',
     });
 
-    // 2. Insert into students table
     const { data, error } = await this.client.from('students').upsert({
       user_id: userId,
       roll_no: student.roll_no,
       name: student.name,
-      email: student.email,
       department: student.department || 'Information Technology',
       year_level: student.year_level || '3rd Year',
       section: student.section || 'B',
-      academic_year_id: 'AY_2026_27',
+      academic_year_id: null,
       qr_token: student.qr_token || `ELITE_QR_${student.roll_no}`,
       status: student.status || 'ACTIVE',
       updated_at: new Date().toISOString(),
@@ -113,18 +115,35 @@ class SupabaseAdminService {
   }
 
   async updateStudent(rollNo, updates) {
+    const cleanUpdates = { ...updates };
+    delete cleanUpdates.email; // email is stored in users table
+
     const { data, error } = await this.client
       .from('students')
-      .update({ ...updates, updated_at: new Date().toISOString() })
+      .update({ ...cleanUpdates, updated_at: new Date().toISOString() })
       .eq('roll_no', rollNo);
 
     if (error) throw error;
+
+    if (updates.email || updates.name || updates.status) {
+      const userId = `u_${rollNo.toLowerCase()}`;
+      try {
+        await this.client.from('users').update({
+          email: updates.email,
+          status: updates.status,
+        }).eq('id', userId);
+      } catch (err) {
+        console.warn('Could not sync user status:', err);
+      }
+    }
+
     return data;
   }
 
   async deleteStudent(rollNo) {
-    const { error } = await this.client.from('students').delete().eq('roll_no', rollNo);
-    if (error) throw error;
+    const userId = `u_${rollNo.toLowerCase()}`;
+    await this.client.from('students').delete().eq('roll_no', rollNo);
+    await this.client.from('users').delete().eq('id', userId);
     return true;
   }
 
@@ -132,7 +151,10 @@ class SupabaseAdminService {
   async getStaff() {
     const { data, error } = await this.client.from('staff').select('*').order('employee_id', { ascending: true });
     if (error) throw error;
-    return data || [];
+    return (data || []).map((st) => ({
+      ...st,
+      email: `${st.employee_id.toLowerCase()}@sasi.ac.in`,
+    }));
   }
 
   async addStaff(staffMember) {
@@ -140,7 +162,7 @@ class SupabaseAdminService {
     await this.client.from('users').upsert({
       id: userId,
       username: staffMember.employee_id,
-      email: staffMember.email,
+      email: staffMember.email || `${staffMember.employee_id.toLowerCase()}@sasi.ac.in`,
       role: 'STAFF',
       department: staffMember.department || 'Information Technology',
     });
@@ -151,13 +173,33 @@ class SupabaseAdminService {
       name: staffMember.name,
       designation: staffMember.designation || 'Assistant Professor',
       department: staffMember.department || 'Information Technology',
-      email: staffMember.email,
       phone: staffMember.phone,
       cabin: staffMember.cabin || 'IT Staff Room A',
+      username: staffMember.employee_id,
     });
 
     if (error) throw error;
     return data;
+  }
+
+  async updateStaff(employeeId, updates) {
+    const cleanUpdates = { ...updates };
+    delete cleanUpdates.email;
+
+    const { data, error } = await this.client
+      .from('staff')
+      .update(cleanUpdates)
+      .eq('employee_id', employeeId);
+
+    if (error) throw error;
+    return data;
+  }
+
+  async deleteStaff(employeeId) {
+    const userId = `u_${employeeId.toLowerCase()}`;
+    await this.client.from('staff').delete().eq('employee_id', employeeId);
+    await this.client.from('users').delete().eq('id', userId);
+    return true;
   }
 
   // ─── Events Operations ───
@@ -415,16 +457,23 @@ class SupabaseAdminService {
 
   async logAttendance({ studentRoll, studentName, eventId, room = 'Turnstile Gate #2', status = 'PRESENT' }) {
     const id = `ATT-${Date.now()}`;
+    const cleanRoll = studentRoll.toUpperCase().trim();
+    const studentId = `u_${cleanRoll.toLowerCase()}`;
+    const studentEmail = `${cleanRoll.toLowerCase()}@sasi.ac.in`;
+
     const { data, error } = await this.client.from('event_attendance').insert({
       id,
-      event_id: eventId || 'General Campus Turnstile Access',
-      student_roll: studentRoll.toUpperCase().trim(),
+      event_id: eventId || 'ev_vibe_coding',
+      student_id: studentId,
+      student_roll: cleanRoll,
       student_name: studentName || 'Student Access',
+      student_email: studentEmail,
       scanned_by: room,
+      scanned_by_name: 'Admin Console',
       status: status.toUpperCase(),
       session: room,
       scanned_at: new Date().toISOString(),
-    });
+    }).select();
 
     if (error) throw error;
     return data;
@@ -491,6 +540,32 @@ class SupabaseAdminService {
     return true;
   }
 
+  async deletePoll(pollId) {
+    await this.client.from('poll_votes').delete().eq('poll_id', pollId);
+    await this.client.from('poll_options').delete().eq('poll_id', pollId);
+    const { error } = await this.client.from('polls').delete().eq('id', pollId);
+    if (error) throw error;
+    return true;
+  }
+
+  async deleteRegistration(registrationId) {
+    const { error } = await this.client.from('event_registrations').delete().eq('id', registrationId);
+    if (error) throw error;
+    return true;
+  }
+
+  async deleteAttendance(attendanceId) {
+    const { error } = await this.client.from('event_attendance').delete().eq('id', attendanceId);
+    if (error) throw error;
+    return true;
+  }
+
+  async deleteNotification(notificationId) {
+    const { error } = await this.client.from('notifications').delete().eq('id', notificationId);
+    if (error) throw error;
+    return true;
+  }
+
   // ─── Broadcast Notifications & Alerts ───
   async getNotifications({ limit = 30 } = {}) {
     const { data, error } = await this.client
@@ -535,7 +610,94 @@ class SupabaseAdminService {
     if (error) throw error;
     return data;
   }
+
+  // ─── Direct Database Management & Dynamic Table Operations ───
+  getTableDefinitions() {
+    return [
+      { name: 'events', pk: 'id', label: 'Events', desc: 'Department technical & cultural events' },
+      { name: 'students', pk: 'user_id', altPk: 'roll_no', label: 'Students', desc: 'Enrolled student academic profiles' },
+      { name: 'users', pk: 'id', label: 'Users', desc: 'Authentication & core user credentials' },
+      { name: 'profiles', pk: 'id', label: 'Profiles', desc: 'Consolidated user profiles for mobile' },
+      { name: 'staff', pk: 'user_id', altPk: 'employee_id', label: 'Faculty & Staff', desc: 'Department professors and mentors' },
+      { name: 'event_registrations', pk: 'id', label: 'Registrations', desc: 'Individual & team event registrations' },
+      { name: 'event_attendance', pk: 'id', label: 'Attendance Logs', desc: 'Turnstile & session check-in logs' },
+      { name: 'project_submissions', pk: 'id', label: 'Project Submissions', desc: 'Hackathon & competition submissions' },
+      { name: 'project_votes', pk: 'id', label: 'Project Votes', desc: 'Peer & faculty showcase votes' },
+      { name: 'polls', pk: 'id', label: 'Polls', desc: 'Campus opinion polls & surveys' },
+      { name: 'poll_options', pk: 'id', label: 'Poll Options', desc: 'Choices for active polls' },
+      { name: 'poll_votes', pk: 'id', label: 'Poll Votes', desc: 'Student votes recorded per option' },
+      { name: 'notifications', pk: 'id', label: 'Notifications', desc: 'System alerts and push notifications' },
+      { name: 'notification_reads', pk: 'id', label: 'Notification Reads', desc: 'Read receipts for notifications' },
+      { name: 'student_queries', pk: 'id', label: 'Student Queries', desc: 'Grievances, mentorship & help tickets' },
+      { name: 'academic_years', pk: 'id', label: 'Academic Years', desc: 'College academic sessions' },
+      { name: 'alerts', pk: 'id', label: 'Urgent Alerts', desc: 'High-priority banner alerts' },
+      { name: 'announcements', pk: 'id', label: 'Announcements', desc: 'Campus news bulletins' },
+      { name: 'audit_logs', pk: 'id', label: 'Audit Logs', desc: 'System mutation audit trails' },
+      { name: 'event_staff', pk: 'id', label: 'Event Coordinators', desc: 'Faculty assigned to oversee events' },
+      { name: 'fcm_tokens', pk: 'token', label: 'FCM Push Tokens', desc: 'Device tokens for Firebase messaging' },
+    ];
+  }
+
+  async getTableCounts() {
+    const tables = this.getTableDefinitions();
+    const counts = {};
+    await Promise.all(
+      tables.map(async (t) => {
+        try {
+          const { count } = await this.client.from(t.name).select('*', { count: 'exact', head: true });
+          counts[t.name] = count ?? 0;
+        } catch (_) {
+          counts[t.name] = 0;
+        }
+      })
+    );
+    return counts;
+  }
+
+  async getTableRecords(tableName, { page = 0, limit = 50, sortBy = null, ascending = true } = {}) {
+    let query = this.client.from(tableName).select('*', { count: 'exact' });
+    
+    if (sortBy) {
+      query = query.order(sortBy, { ascending });
+    }
+    
+    const from = page * limit;
+    const to = from + limit - 1;
+    query = query.range(from, to);
+
+    const { data, count, error } = await query;
+    if (error) throw error;
+    return { records: data || [], total: count || 0 };
+  }
+
+  async insertTableRow(tableName, rowData) {
+    const { data, error } = await this.client.from(tableName).insert(rowData).select();
+    if (error) throw error;
+    return data;
+  }
+
+  async updateTableRow(tableName, pkColumn, pkValue, updates) {
+    const { data, error } = await this.client.from(tableName).update(updates).eq(pkColumn, pkValue).select();
+    if (error) throw error;
+    return data;
+  }
+
+  async deleteTableRow(tableName, pkColumn, pkValue) {
+    const { error } = await this.client.from(tableName).delete().eq(pkColumn, pkValue);
+    if (error) throw error;
+    return true;
+  }
+
+  async executeSql(sqlQuery) {
+    const { data, error } = await this.client.rpc('execute_sql_query', {
+      query_text: sqlQuery.trim(),
+    });
+    if (error) throw error;
+    if (data && data.error) throw new Error(data.error);
+    return data;
+  }
 }
 
 export const supabaseAdmin = new SupabaseAdminService();
 export default supabaseAdmin;
+

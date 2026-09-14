@@ -177,9 +177,9 @@ export default function EventsView({ isCreateOpen, setIsCreateOpen }) {
         start_time: formData.start_time,
         end_time: formData.end_time,
         max_capacity: parseInt(formData.max_capacity) || 100,
-        participation_type: formData.participation_type,
-        min_team_size: formData.participation_type === 'Team' ? parseInt(formData.min_team_size) || 2 : 1,
-        max_team_size: formData.participation_type === 'Team' ? parseInt(formData.max_team_size) || 4 : 1,
+        participation_type: formData.participation_type === 'Team'
+          ? `${parseInt(formData.min_team_size) || 2}–${parseInt(formData.max_team_size) || 4} Members per team`
+          : 'Individual',
         is_project_submission_enabled: formData.is_project_submission_enabled,
         project_submission_deadline: formData.is_project_submission_enabled && formData.project_submission_deadline
           ? new Date(formData.project_submission_deadline).toISOString()

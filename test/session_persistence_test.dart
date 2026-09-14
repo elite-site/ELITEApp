@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:elite_app/state/app_state.dart';
 import 'package:elite_app/core/routing/app_router.dart';
-import 'package:elite_app/data/models/app_models.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
