@@ -423,7 +423,7 @@ class SupabaseAdminService {
   async getAttendanceLogs({ limit = 50 } = {}) {
     const { data, error } = await this.client
       .from('event_attendance')
-      .select('*, events(title), profiles(full_name, roll_number)')
+      .select('*, events(title), profiles!student_id(full_name, roll_number)')
       .order('scanned_at', { ascending: false })
       .limit(limit);
 
@@ -809,28 +809,6 @@ class SupabaseAdminService {
   async updateTicketStatus(ticketId, newStatus, mentor) {
     try {
       await this.client.from('tickets').update({ status: newStatus, mentor }).eq('id', ticketId);
-    } catch (_) {}
-    return true;
-  }
-
-  // ─── Notifications & Broadcasts ───
-  async getNotifications() {
-    try {
-      const { data, error } = await this.client.from('notifications').select('*').order('created_at', { ascending: false });
-      if (!error && data) return data;
-    } catch (_) {}
-    return [];
-  }
-
-  async broadcastNotification({ title, message, category, target_audience }) {
-    try {
-      await this.client.from('notifications').insert({
-        title,
-        message,
-        category,
-        target_audience,
-        created_at: new Date().toISOString(),
-      });
     } catch (_) {}
     return true;
   }

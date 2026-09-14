@@ -920,7 +920,7 @@ class SupabaseService extends ChangeNotifier {
     try {
       var query = c
           .from('event_attendance')
-          .select('id, event_id, student_id, scanned_by, status, session, scanned_at, profiles!inner(full_name, roll_number), events(title, venue)');
+          .select('id, event_id, student_id, scanned_by, status, session, scanned_at, profiles!student_id!inner(full_name, roll_number), events(title, venue)');
 
       if (studentRoll != null && studentRoll.isNotEmpty) {
         query = query.ilike('profiles.roll_number', studentRoll.trim());
