@@ -1,0 +1,70 @@
+name: Build and Publish Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Release Flutter APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Release APKs (Universal & Split per CPU Architecture)
+        run: |
+          flutter build apk --release
+          flutter build apk --release --split-per-abi
+
+      - name: Publish GitHub Release with Architecture APKs
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            build/app/outputs/flutter-apk/app-x86_64-release.apk
+            build/app/outputs/flutter-apk/app-release.apk
+          name: "ELITE IT Platform ${{ github.ref_name }}"
+          body: |
+            ## 📱 ELITE IT Mobile App Release (${{ github.ref_name }})
+            
+            ### Available Architecture Builds:
+            - **`app-arm64-v8a-release.apk` (18.4 MB)**: **Recommended** for almost all modern Android phones (64-bit ARM).
+            - **`app-armeabi-v7a-release.apk` (16.0 MB)**: For older 32-bit Android devices.
+            - **`app-x86_64-release.apk` (19.8 MB)**: For Android emulators and x86 Chromebooks.
+            - **`app-release.apk` (52.1 MB)**: Universal bundle containing all CPU architectures.
+
+            ### Platform Features:
+            - **100% Supabase Backend** (No Firebase)
+            - Student & Faculty Authentication
+            - Turnstile NFC/QR Lab Gate Pass System
+            - Department Events Lineup & Live Registration
+            - Real-time Polls & Voting
+            - Emergency Broadcasts & Notifications
+            - Student Helpdesk & Service Tickets
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
