@@ -177,7 +177,7 @@ class PollsScreen extends StatelessWidget {
             final isSelected = poll.userVotedIndex == index;
 
             return GestureDetector(
-              onTap: () => state.voteOnPoll(poll.id, index),
+              onTap: hasVoted ? null : () => state.voteOnPoll(poll.id, index),
               child: Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 decoration: BoxDecoration(

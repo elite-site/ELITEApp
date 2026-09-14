@@ -36,16 +36,20 @@ class AppState extends ChangeNotifier {
     _restoreSession();
 
     // 1. Parallel Realtime Sync with Supabase (instant WebSocket updates)
-    _supabaseService.subscribeToRealtimeChanges(() {
-      if (isLoggedIn) {
-        debugPrint('⚡ Realtime parallel sync triggered in Flutter App');
-        syncFromSupabase();
-      }
-    });
+    _setupRealtimeSubscription();
 
     // 2. High-frequency parallel sync interval (every 5 seconds)
     _syncTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (isLoggedIn) {
+        syncFromSupabase();
+      }
+    });
+  }
+
+  void _setupRealtimeSubscription() {
+    _supabaseService.subscribeToRealtimeChanges(() {
+      if (isLoggedIn) {
+        debugPrint('⚡ Realtime parallel sync triggered in Flutter App');
         syncFromSupabase();
       }
     });
@@ -80,6 +84,7 @@ class AppState extends ChangeNotifier {
 
         if (profile != null && profile.id.isNotEmpty) {
           _currentUser = profile;
+          _setupRealtimeSubscription();
           await syncFromSupabase();
           debugPrint('AppState: Successfully restored session for ${profile.name} (${profile.role})');
         } else {
@@ -189,6 +194,7 @@ class AppState extends ChangeNotifier {
           debugPrint('AppState: Warning persisting session: $err');
         }
 
+        _setupRealtimeSubscription();
         await syncFromSupabase();
         _isLoadingFromSupabase = false;
         notifyListeners();
@@ -253,10 +259,8 @@ class AppState extends ChangeNotifier {
       final liveLogs = await _supabaseService.fetchAttendanceLogs(
         user.isStudent ? user.rollNumber : null,
       );
-      if (liveLogs.isNotEmpty) {
-        _attendanceLogs.clear();
-        _attendanceLogs.addAll(liveLogs);
-      }
+      _attendanceLogs.clear();
+      _attendanceLogs.addAll(liveLogs);
 
       // 3. Fetch live events
       final supaEvents = await _supabaseService.fetchEvents();
@@ -275,15 +279,11 @@ class AppState extends ChangeNotifier {
 
       // 4. Fetch live polls
       final supaPolls = await _supabaseService.fetchPolls(userId: currentUser.id);
-      if (supaPolls.isNotEmpty) {
-        _polls = supaPolls;
-      }
+      _polls = supaPolls;
 
       // 5. Fetch live notifications
       final supaNotifs = await _supabaseService.fetchNotifications(userId: currentUser.id);
-      if (supaNotifs.isNotEmpty) {
-        _notifications = supaNotifs;
-      }
+      _notifications = supaNotifs;
 
       // 6. Fetch student and staff rosters
       final students = await _supabaseService.fetchStudentsList();
@@ -590,19 +590,27 @@ class AppState extends ChangeNotifier {
 
     final poll = _polls[pollIndex];
     if (poll.userVotedIndex != null) {
-      poll.options[poll.userVotedIndex!].votes--;
+      debugPrint('User has already cast a vote for this poll.');
+      return false;
     }
+
     poll.userVotedIndex = optionIndex;
     poll.options[optionIndex].votes++;
     notifyListeners();
 
     if (_supabaseService.isInitialized) {
       final opt = poll.options[optionIndex];
-      await _supabaseService.castVote(
+      final ok = await _supabaseService.castVote(
         pollId: pollId,
         optionId: opt.id,
         userId: currentUser.id,
       );
+      if (!ok) {
+        poll.userVotedIndex = null;
+        poll.options[optionIndex].votes = (poll.options[optionIndex].votes - 1).clamp(0, 999999);
+        notifyListeners();
+        return false;
+      }
     }
     return true;
   }

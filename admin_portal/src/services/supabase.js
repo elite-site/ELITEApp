@@ -908,6 +908,31 @@ class SupabaseAdminService {
     return true;
   }
 
+  async getNotifications({ limit = 50 } = {}) {
+    const { data, error } = await this.client
+      .from('notifications')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return data || [];
+  }
+
+  async broadcastNotification({ title, message, category = 'General', target_audience = 'ALL' }) {
+    const { data, error } = await this.client
+      .from('notifications')
+      .insert({
+        title,
+        message,
+        category,
+        target_audience,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
   async executeSql(sqlQuery) {
     const { data, error } = await this.client.rpc('execute_sql_query', {
       query_text: sqlQuery.trim(),

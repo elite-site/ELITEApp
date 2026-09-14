@@ -19,11 +19,16 @@ class _EventsScreenState extends State<EventsScreen> {
   String _searchQuery = '';
   bool _showMyRegistrationsOnly = false;
 
-  final List<String> _categories = ["All", "Workshops", "Hackathons", "Tech Talks"];
-
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+
+    final categories = ["All"];
+    for (final ev in state.events) {
+      if (ev.category.isNotEmpty && !categories.contains(ev.category)) {
+        categories.add(ev.category);
+      }
+    }
 
     List<EventModel> displayedEvents = state.filteredEvents;
 
@@ -99,7 +104,7 @@ class _EventsScreenState extends State<EventsScreen> {
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
-                    children: _categories.map((cat) {
+                    children: categories.map((cat) {
                       final isSelected = state.selectedEventCategory == cat;
                       return Padding(
                         padding: const EdgeInsets.only(right: 8),

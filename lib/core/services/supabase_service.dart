@@ -89,10 +89,11 @@ class SupabaseService extends ChangeNotifier {
       String targetEmail = u;
       if (!u.contains('@')) {
         // Look up profile by roll_number or id
-        final profileRes = await c
-            .from('profiles')
-            .select('id, email, roll_number')
-            .or('roll_number.ilike.$u,id.eq.$u')
+        final isUuid = RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(u);
+        final profileQuery = c.from('profiles').select('id, email, roll_number');
+        final profileRes = await (isUuid
+            ? profileQuery.or('roll_number.ilike.$u,id.eq.$u')
+            : profileQuery.ilike('roll_number', u))
             .maybeSingle();
 
         if (profileRes != null && profileRes['email'] != null && profileRes['email'].toString().isNotEmpty) {
@@ -163,10 +164,11 @@ class SupabaseService extends ChangeNotifier {
 
     try {
       // Authoritative lookup on profiles table (id, email, or roll_number)
-      final res = await c
-          .from('profiles')
-          .select()
-          .or('id.eq.$q,email.ilike.$q,roll_number.ilike.$q')
+      final isUuid = RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(q);
+      final queryBuilder = c.from('profiles').select();
+      final res = await (isUuid
+          ? queryBuilder.or('id.eq.$q,email.ilike.$q,roll_number.ilike.$q')
+          : queryBuilder.or('email.ilike.$q,roll_number.ilike.$q'))
           .maybeSingle();
 
       if (res != null) {
@@ -652,7 +654,7 @@ class SupabaseService extends ChangeNotifier {
 
       final res = await c
           .from('project_submissions')
-          .select()
+          .select('*, teams(team_name), project_images(*)')
           .eq('event_id', eventId)
           .or('team_id.eq.$registrationId,id.eq.$registrationId,submitted_by.eq.$registrationId')
           .maybeSingle();
@@ -674,7 +676,7 @@ class SupabaseService extends ChangeNotifier {
     try {
       final res = await c
           .from('project_submissions')
-          .select()
+          .select('*, teams(team_name), project_images(*)')
           .eq('event_id', eventId)
           .eq('is_published', true)
           .order('submitted_at', ascending: false);
@@ -868,10 +870,12 @@ class SupabaseService extends ChangeNotifier {
     }
 
     try {
-      final studentRes = await c
-          .from('profiles')
-          .select()
-          .or('id.eq.$query,roll_number.ilike.$query,email.ilike.$query')
+      final clean = query.replaceAll('PASS-', '').trim();
+      final isUuid = RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(clean);
+      final profileQuery = c.from('profiles').select();
+      final studentRes = await (isUuid
+          ? profileQuery.or('id.eq.$clean,roll_number.ilike.$clean,email.ilike.$clean')
+          : profileQuery.or('roll_number.ilike.$clean,email.ilike.$clean'))
           .maybeSingle();
 
       if (studentRes == null) {
@@ -1087,7 +1091,52 @@ class SupabaseService extends ChangeNotifier {
   // ─── Notifications & Broadcasts ──────────────────────────────────────────
 
   Future<List<AppNotification>> fetchNotifications({String? userId}) async {
-    return [];
+    final c = client;
+    if (c == null) return [];
+
+    try {
+      final res = await c
+          .from('notifications')
+          .select()
+          .order('created_at', ascending: false)
+          .limit(50);
+
+      final List<AppNotification> list = [];
+      final now = DateTime.now();
+
+      for (final r in res) {
+        final createdAtStr = r['created_at']?.toString();
+        String timeAgoStr = 'Just now';
+        if (createdAtStr != null) {
+          final dt = DateTime.tryParse(createdAtStr);
+          if (dt != null) {
+            final diff = now.difference(dt);
+            if (diff.inDays > 0) {
+              timeAgoStr = '${diff.inDays}d ago';
+            } else if (diff.inHours > 0) {
+              timeAgoStr = '${diff.inHours}h ago';
+            } else if (diff.inMinutes > 0) {
+              timeAgoStr = '${diff.inMinutes}m ago';
+            } else {
+              timeAgoStr = 'Just now';
+            }
+          }
+        }
+
+        list.add(AppNotification(
+          id: r['id']?.toString() ?? '',
+          title: r['title']?.toString() ?? 'Announcement',
+          message: r['message']?.toString() ?? '',
+          timeAgo: timeAgoStr,
+          category: r['category']?.toString() ?? 'General',
+          isRead: false,
+        ));
+      }
+      return list;
+    } catch (e) {
+      debugPrint('SupabaseService.fetchNotifications error: $e');
+      return [];
+    }
   }
 
   Future<bool> broadcastNotification({
@@ -1096,7 +1145,21 @@ class SupabaseService extends ChangeNotifier {
     String category = 'Urgent',
     String targetAudience = 'ALL',
   }) async {
-    return true;
+    final c = client;
+    if (c == null) return false;
+
+    try {
+      await c.from('notifications').insert({
+        'title': title,
+        'message': message,
+        'category': category,
+        'target_audience': targetAudience,
+      });
+      return true;
+    } catch (e) {
+      debugPrint('SupabaseService.broadcastNotification error: $e');
+      return false;
+    }
   }
 
   // ─── Students & Staff Directories (Staff & Admin) ──────────────────────────
