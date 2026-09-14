@@ -225,15 +225,17 @@ class SupabaseService extends ChangeNotifier {
 
       final List<EventModel> list = [];
       for (var row in res) {
-        final dateStr = (row['event_date'] ?? '2026-10-24').toString();
-        final parts = dateStr.split('-');
-        String month = "OCT";
-        String day = "24";
-        if (parts.length >= 3) {
-          final mInt = int.tryParse(parts[1]) ?? 10;
-          const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-          month = months[(mInt - 1).clamp(0, 11)];
-          day = parts[2];
+        final dateVal = row['event_date']?.toString();
+        String month = "TBD";
+        String day = "SAT";
+        if (dateVal != null && dateVal.isNotEmpty) {
+          final parts = dateVal.split('-');
+          if (parts.length >= 3) {
+            final mInt = int.tryParse(parts[1]) ?? 9;
+            const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+            month = months[(mInt - 1).clamp(0, 11)];
+            day = parts[2];
+          }
         }
 
         final eventType = (row['event_type'] ?? 'individual').toString().toLowerCase();

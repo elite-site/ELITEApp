@@ -270,19 +270,32 @@ class SupabaseAdminService {
   async getEvents() {
     const { data, error } = await this.client
       .from('events')
-      .select('*, event_registrations(count)')
-      .order('event_date', { ascending: true });
+      .select('*, event_registrations(count), event_coordinators(*)')
+      .order('start_time', { ascending: true });
 
     if (error) throw error;
 
-    return (data || []).map((ev) => ({
-      ...ev,
-      registered_count: ev.event_registrations?.[0]?.count ?? 0,
-      banner_url: ev.image_url,
-      rules: ev.instructions || '',
-      faculty_coordinators: 'Department Coordinators',
-      participation_type: ev.event_type === 'team' ? 'Team (2-4 Members)' : 'Individual',
-    }));
+    return (data || []).map((ev) => {
+      const coords = ev.event_coordinators || [];
+      const faculty = coords
+        .filter((c) => c.coordinator_type === 'faculty')
+        .map((c) => `${c.coordinator_name}${c.is_primary ? ' (Primary)' : ''}`)
+        .join(', ');
+      const students = coords
+        .filter((c) => c.coordinator_type === 'student')
+        .map((c) => c.coordinator_name)
+        .join(', ');
+
+      return {
+        ...ev,
+        registered_count: ev.event_registrations?.[0]?.count ?? 0,
+        banner_url: ev.image_url,
+        rules: ev.instructions || '',
+        faculty_coordinators: faculty || 'None Assigned',
+        student_coordinators: students || 'None Assigned',
+        participation_type: ev.event_type === 'team' ? 'Team (2-4 Members)' : 'Individual',
+      };
+    });
   }
 
   async createEvent(event) {
