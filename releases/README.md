@@ -4,7 +4,7 @@ Download the appropriate APK binary for your Android device:
 
 | Architecture | APK File | Size | Suitable For |
 | :--- | :--- | :--- | :--- |
-| **v1.0.8 Release (ARM64)** *(Latest)* | [`ELITE_IT_v1.0.8.apk`](./ELITE_IT_v1.0.8.apk) | **18.9 MB** | Session persistence, event registration, project showcase & submissions, voting system |
+| **v1.0.9 Release (ARM64)** *(Latest)* | [`ELITE_IT_v1.0.9.apk`](./ELITE_IT_v1.0.9.apk) | **18.9 MB** | Dual-app Supabase sync, attendance relationships, real-time events & polling, project showcase |
 | **ARM 64-bit** *(Recommended)* | [`ELITE_IT_arm64-v8a.apk`](./ELITE_IT_arm64-v8a.apk) | **18.9 MB** | **All modern Android phones** (Samsung, OnePlus, Google Pixel, Xiaomi, Vivo, Oppo, Realme, etc.) |
 | **ARM 32-bit (v7)** | [`ELITE_IT_armeabi-v7a.apk`](./ELITE_IT_armeabi-v7a.apk) | **16.5 MB** | Older 32-bit Android smartphones |
 | **x86 64-bit** | [`ELITE_IT_x86_64.apk`](./ELITE_IT_x86_64.apk) | **20.3 MB** | Android Studio Emulators & Chromebooks |
