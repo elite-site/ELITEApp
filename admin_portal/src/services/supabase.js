@@ -291,77 +291,115 @@ class SupabaseAdminService {
 
   // ─── Supabase Realtime Subscriptions ───
   subscribeToEvents(onPayload) {
-    const channel = this.client
-      .channel('admin_events_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'events' },
-        (payload) => onPayload(payload)
-      )
-      .subscribe();
-    return () => {
-      this.client.removeChannel(channel);
-    };
+    try {
+      const channelId = `admin_events_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const channel = this.client
+        .channel(channelId)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'events' },
+          (payload) => onPayload(payload)
+        )
+        .subscribe();
+      return () => {
+        try {
+          this.client.removeChannel(channel);
+        } catch (e) {}
+      };
+    } catch (err) {
+      console.warn('Realtime subscribeToEvents failed:', err);
+      return () => {};
+    }
   }
 
   subscribeToRegistrations(onPayload) {
-    const channel = this.client
-      .channel('admin_registrations_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'event_registrations' },
-        (payload) => onPayload(payload)
-      )
-      .subscribe();
-    return () => {
-      this.client.removeChannel(channel);
-    };
+    try {
+      const channelId = `admin_regs_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const channel = this.client
+        .channel(channelId)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'event_registrations' },
+          (payload) => onPayload(payload)
+        )
+        .subscribe();
+      return () => {
+        try {
+          this.client.removeChannel(channel);
+        } catch (e) {}
+      };
+    } catch (err) {
+      console.warn('Realtime subscribeToRegistrations failed:', err);
+      return () => {};
+    }
   }
 
   subscribeToProjectSubmissions(eventId, onPayload) {
-    const channelName = eventId ? `admin_proj_sub_${eventId}` : 'admin_proj_sub_all';
-    const filter = eventId ? `event_id=eq.${eventId}` : undefined;
-    const channel = this.client
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'project_submissions', filter },
-        (payload) => onPayload(payload)
-      )
-      .subscribe();
-    return () => {
-      this.client.removeChannel(channel);
-    };
+    try {
+      const channelId = `admin_proj_sub_${eventId || 'all'}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const filter = eventId ? `event_id=eq.${eventId}` : undefined;
+      const channel = this.client
+        .channel(channelId)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'project_submissions', filter },
+          (payload) => onPayload(payload)
+        )
+        .subscribe();
+      return () => {
+        try {
+          this.client.removeChannel(channel);
+        } catch (e) {}
+      };
+    } catch (err) {
+      console.warn('Realtime subscribeToProjectSubmissions failed:', err);
+      return () => {};
+    }
   }
 
   subscribeToProjectVotes(eventId, onPayload) {
-    const channelName = eventId ? `admin_proj_votes_${eventId}` : 'admin_proj_votes_all';
-    const filter = eventId ? `event_id=eq.${eventId}` : undefined;
-    const channel = this.client
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'project_votes', filter },
-        (payload) => onPayload(payload)
-      )
-      .subscribe();
-    return () => {
-      this.client.removeChannel(channel);
-    };
+    try {
+      const channelId = `admin_proj_votes_${eventId || 'all'}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const filter = eventId ? `event_id=eq.${eventId}` : undefined;
+      const channel = this.client
+        .channel(channelId)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'project_votes', filter },
+          (payload) => onPayload(payload)
+        )
+        .subscribe();
+      return () => {
+        try {
+          this.client.removeChannel(channel);
+        } catch (e) {}
+      };
+    } catch (err) {
+      console.warn('Realtime subscribeToProjectVotes failed:', err);
+      return () => {};
+    }
   }
 
   subscribeToPollVotes(onPayload) {
-    const channel = this.client
-      .channel('admin_poll_options_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'poll_options' },
-        (payload) => onPayload(payload)
-      )
-      .subscribe();
-    return () => {
-      this.client.removeChannel(channel);
-    };
+    try {
+      const channelId = `admin_poll_opts_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const channel = this.client
+        .channel(channelId)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'poll_options' },
+          (payload) => onPayload(payload)
+        )
+        .subscribe();
+      return () => {
+        try {
+          this.client.removeChannel(channel);
+        } catch (e) {}
+      };
+    } catch (err) {
+      console.warn('Realtime subscribeToPollVotes failed:', err);
+      return () => {};
+    }
   }
 
   // ─── Turnstile Attendance Operations ───
